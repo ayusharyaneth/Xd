@@ -27,8 +27,7 @@ git clone https://github.com/ayusharyaneth/dexy.git
 cd dexy
 ```
 
-2.
-```bash
+2. ```bash
 pip install -r requirements.txt
 # or for Python 3 specifically
 pip3 install -r requirements.txt
