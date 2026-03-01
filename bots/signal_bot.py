@@ -14,7 +14,7 @@ import time
 def admin_restricted(func):
     """
     Decorator to restrict handler access to admin users only.
-    Unauthorized attempts are logged to a dedicated Telegram channel, NOT the console.
+    Unauthorized attempts are logged to a dedicated Telegram channel if configured.
     """
     @wraps(func)
     async def wrapper(self, update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
@@ -22,7 +22,8 @@ def admin_restricted(func):
         if not user:
             return
 
-        admin_ids = settings.get_admins()
+        # Use the new property accessor for admin IDs
+        admin_ids = settings.admin_list
         
         if user.id not in admin_ids:
             # 1. Reject User
@@ -33,30 +34,30 @@ def admin_restricted(func):
             elif update.message:
                 await update.message.reply_text(rejection_text, parse_mode='Markdown')
 
-            # 2. Log to Dedicated Channel (Silent Log)
-            try:
-                action_type = "Command" if update.message else "Callback"
-                content = update.message.text if update.message else update.callback_query.data
-                username = f"@{user.username}" if user.username else "N/A"
-                timestamp = get_ist_time_str()
-                
-                log_msg = (
-                    f"🚨 **Unauthorized Access Attempt**\n\n"
-                    f"👤 **User ID:** `{user.id}`\n"
-                    f"🧾 **Username:** {username}\n"
-                    f"📩 **Action:** `{action_type}: {content}`\n"
-                    f"🕒 **Time:** `{timestamp}`\n"
-                    f"📡 **Chat ID:** `{update.effective_chat.id}`"
-                )
-                
-                await context.bot.send_message(
-                    chat_id=settings.LOG_CHANNEL_ID,
-                    text=log_msg,
-                    parse_mode='Markdown'
-                )
-            except Exception as e:
-                # Fallback: only log internal error if the log channel fails
-                log.error(f"Failed to send security log: {e}")
+            # 2. Log to Dedicated Channel (Only if configured)
+            if settings.LOG_CHANNEL_ID:
+                try:
+                    action_type = "Command" if update.message else "Callback"
+                    content = update.message.text if update.message else update.callback_query.data
+                    username = f"@{user.username}" if user.username else "N/A"
+                    timestamp = get_ist_time_str()
+                    
+                    log_msg = (
+                        f"🚨 **Unauthorized Access Attempt**\n\n"
+                        f"👤 **User ID:** `{user.id}`\n"
+                        f"🧾 **Username:** {username}\n"
+                        f"📩 **Action:** `{action_type}: {content}`\n"
+                        f"🕒 **Time:** `{timestamp}`\n"
+                        f"📡 **Chat ID:** `{update.effective_chat.id}`"
+                    )
+                    
+                    await context.bot.send_message(
+                        chat_id=settings.LOG_CHANNEL_ID,
+                        text=log_msg,
+                        parse_mode='Markdown'
+                    )
+                except Exception as e:
+                    log.error(f"Failed to send security log: {e}")
             
             # Stop execution
             return
