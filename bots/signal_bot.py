@@ -18,45 +18,97 @@ class SignalBot:
         self.app.add_handler(CallbackQueryHandler(self.handle_callback))
 
     async def initialize(self):
+        """
+        Initializes the bot application and starts the polling mechanism 
+        in a non-blocking background task.
+        """
         await self.app.initialize()
         await self.app.start()
-        # Non-blocking polling
-        await self.app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        # drop_pending_updates=True ensures the bot doesn't crash processing old/stale updates on startup
+        await self.app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+        log.info("Signal Bot Polling Started")
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("🤖 DexScreener Intelligence Bot Active")
+        """
+        Handles /start command. Displays welcome message and status button.
+        """
+        keyboard = [
+            [InlineKeyboardButton("🟢 Online", callback_data="status_check")],
+            [InlineKeyboardButton("ℹ️ Help", callback_data="help_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            "🤖 **DexScreener Intelligence System**\n\n"
+            "System is active and monitoring the blockchain for high-value signals.\n"
+            "You will receive automatic alerts in the configured channel.",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
 
     async def cmd_ping(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         watches = len(state_manager.get_all())
         await update.message.reply_text(f"🏓 Pong!\nWatching {watches} tokens.")
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Central router for all inline button clicks.
+        """
         query = update.callback_query
-        # CRITICAL: Always answer query to stop loading animation
+        # Always answer to stop the loading animation on the client side
         await query.answer()
         
         data = query.data.split(":")
         action = data[0]
-        address = data[1] if len(data) > 1 else None
+        
+        try:
+            if action == "status_check":
+                await query.edit_message_text(
+                    text=f"✅ **System Normal**\nTime: {asyncio.get_running_loop().time():.2f}",
+                    parse_mode='Markdown'
+                )
+                
+            elif action == "watch":
+                address = data[1] if len(data) > 1 else None
+                if address:
+                    await self._handle_watch_action(query, address)
+                    
+            elif action == "refresh":
+                # Placeholder for refresh logic - typically re-fetches token data
+                await query.edit_message_caption(
+                    caption=query.message.caption + "\n\n🔄 *Data Refreshed*",
+                    parse_mode='Markdown',
+                    reply_markup=query.message.reply_markup
+                )
 
-        if action == "watch" and address:
-            # We need to fetch current price for entry
-            try:
-                pairs = await self.api.get_pairs_bulk([address])
-                if pairs:
-                    price = float(pairs[0].get('priceUsd', 0))
-                    metadata = {
-                        "entry_price": price,
-                        "symbol": pairs[0]['baseToken']['symbol'],
-                        "chat_id": query.message.chat_id
-                    }
-                    await state_manager.add_token(address, metadata)
-                    await query.edit_message_caption(
-                        caption=query.message.caption + f"\n\n✅ **Added to Watchlist @ ${price}**",
-                        reply_markup=query.message.reply_markup
-                    )
-            except Exception as e:
-                log.error(f"Watch error: {e}")
+        except Exception as e:
+            log.error(f"Callback error ({action}): {e}")
+
+    async def _handle_watch_action(self, query, address):
+        try:
+            pairs = await self.api.get_pairs_bulk([address])
+            if pairs:
+                price = float(pairs[0].get('priceUsd', 0))
+                metadata = {
+                    "entry_price": price,
+                    "symbol": pairs[0]['baseToken']['symbol'],
+                    "chat_id": query.message.chat_id
+                }
+                await state_manager.add_token(address, metadata)
+                
+                # Update the button to show it's being watched
+                keyboard = [
+                    [InlineKeyboardButton("✅ Watching", callback_data="noop")],
+                    [InlineKeyboardButton("📈 DexScreener", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{address}")]
+                ]
+                
+                await query.edit_message_caption(
+                    caption=query.message.caption + f"\n\n✅ **Added to Watchlist @ ${price}**",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                    parse_mode='Markdown'
+                )
+        except Exception as e:
+            log.error(f"Watch action failed: {e}")
 
     async def broadcast_signal(self, analysis: dict):
         """Sends the formatted signal to the channel"""
@@ -86,7 +138,6 @@ class SignalBot:
             log.error(f"Broadcast failed: {e}")
 
     async def send_exit_alert(self, address: str, pnl: float, reason: str):
-        # Notify admins or specific chat
         data = state_manager.get_all().get(address)
         if not data: return
         
@@ -97,6 +148,8 @@ class SignalBot:
             log.error(f"Exit alert failed: {e}")
 
     async def shutdown(self):
-        await self.app.updater.stop()
-        await self.app.stop()
+        if self.app.updater.running:
+            await self.app.updater.stop()
+        if self.app.running:
+            await self.app.stop()
         await self.app.shutdown()
