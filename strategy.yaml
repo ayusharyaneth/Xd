@@ -1,26 +1,379 @@
-risk:
-  max_fdv: 10000000
-  min_liquidity: 5000
-whale:
-  min_trade_usd: 10000
+# ============================================================
+# DEXSCREENER INTELLIGENCE SYSTEM - STRATEGY CONFIGURATION
+# ============================================================
+
+# -----------------------------------------------------------
+# TWO-STAGE FILTER CONFIGURATION
+# -----------------------------------------------------------
+filters:
+  stage1:
+    min_liquidity_usd: 10000
+    min_volume_24h_usd: 5000
+    min_market_cap_usd: 50000
+    max_token_age_hours: 72
+    min_holders: 50
+    excluded_chains:
+      - "testnet"
+      - "devnet"
+    
+  stage2:
+    min_price_change_5m: -20
+    max_price_change_5m: 100
+    min_transactions_5m: 10
+    min_buy_ratio: 0.55
+    require_verified_contract: false
+
+# -----------------------------------------------------------
+# RISK SCORING ENGINE
+# -----------------------------------------------------------
+risk_scoring:
+  weights:
+    liquidity_risk: 0.25
+    volume_risk: 0.20
+    holder_concentration: 0.20
+    contract_risk: 0.15
+    developer_risk: 0.20
+  
+  thresholds:
+    low_risk_max: 30
+    medium_risk_max: 60
+    high_risk_max: 85
+    critical_risk_max: 100
+  
+  factors:
+    liquidity_depth_multiplier: 1.5
+    volume_volatility_penalty: 0.3
+    holder_gvm_penalty: 0.4
+
+# -----------------------------------------------------------
+# VOLUME AUTHENTICITY ENGINE
+# -----------------------------------------------------------
+volume_authenticity:
+  min_natural_volume_ratio: 0.6
+  max_wash_trade_score: 0.4
+  suspicious_patterns:
+    - "circular_trading"
+    - "matched_orders"
+    - "timestamp_clustering"
+  
+  metrics:
+    trade_size_variance_threshold: 0.8
+    time_distribution_uniformity: 0.7
+    buyer_seller_overlap_threshold: 0.3
+  
+  scoring_weights:
+    pattern_detection: 0.4
+    statistical_variance: 0.35
+    network_analysis: 0.25
+
+# -----------------------------------------------------------
+# DEVELOPER REPUTATION TRACKING
+# -----------------------------------------------------------
+developer_reputation:
+  track_history_days: 90
+  min_previous_tokens: 1
+  
+  scoring_factors:
+    previous_rug_count: -50
+    previous_success_rate: 30
+    liquidity_lock_percentage: 20
+    contract_verification: 15
+    social_presence: 10
+  
+  red_flags:
+    - "mint_function"
+    - "blacklist_function"
+    - "pause_trading"
+    - "unverified_contract"
+    - "hidden_owner"
+  
+  reputation_thresholds:
+    trusted: 80
+    neutral: 50
+    suspicious: 25
+    blacklist: 0
+
+# -----------------------------------------------------------
+# BUY QUALITY SCORING
+# -----------------------------------------------------------
+buy_quality:
+  wallet_tiers:
+    whale: {min_usd: 10000, weight: 2.0}
+    shark: {min_usd: 5000, weight: 1.5}
+    dolphin: {min_usd: 1000, weight: 1.2}
+    fish: {min_usd: 100, weight: 1.0}
+    shrimp: {min_usd: 0, weight: 0.8}
+  
+  quality_factors:
+    wallet_diversity: 0.25
+    buy_pressure_sustainability: 0.30
+    entry_timing_quality: 0.25
+    holding_pattern: 0.20
+  
+  min_quality_score: 40
+  high_quality_threshold: 75
+
+# -----------------------------------------------------------
+# WHALE DETECTION
+# -----------------------------------------------------------
+whale_detection:
+  thresholds:
+    min_wallet_value_usd: 50000
+    min_single_buy_usd: 10000
+    min_token_holdings_usd: 5000
+  
+  tracking:
+    max_wallets_to_track: 100
+    position_update_interval_seconds: 60
+    significant_movement_threshold: 0.1
+  
+  alert_conditions:
+    large_buy: {threshold_usd: 20000, cooldown_seconds: 300}
+    large_sell: {threshold_usd: 15000, cooldown_seconds: 300}
+    position_accumulation: {threshold_count: 3, window_minutes: 30}
+
+# -----------------------------------------------------------
+# EARLY BUYER TRACKING
+# -----------------------------------------------------------
 early_buyer:
-  track_count: 50
-  profit_threshold: 3.0
-cluster:
-  similarity_threshold: 0.85
-regime:
-  volatility_window: 3600
-  high_vol_multiplier: 1.5
+  tracking:
+    first_n_buyers: 50
+    track_duration_minutes: 60
+    profit_check_interval_seconds: 120
+  
+  thresholds:
+    significant_profit_multiplier: 2.0
+    distribution_warning_percent: 50
+    early_sell_warning_count: 10
+  
+  scoring:
+    unrealized_pnl_weight: 0.4
+    holding_behavior_weight: 0.35
+    sell_pressure_weight: 0.25
+
+# -----------------------------------------------------------
+# WALLET CLUSTER DETECTION
+# -----------------------------------------------------------
+wallet_cluster:
+  detection:
+    min_cluster_size: 3
+    max_wallet_age_days: 7
+    funding_similarity_threshold: 0.85
+    timing_similarity_threshold: 0.75
+    trade_pattern_similarity: 0.80
+  
+  suspicion_indicators:
+    same_funding_source: 30
+    coordinated_trading: 40
+    similar_position_sizes: 20
+    new_wallet_creation: 10
+  
+  scoring_weights:
+    funding_analysis: 0.35
+    timing_analysis: 0.35
+    trade_patterns: 0.30
+
+# -----------------------------------------------------------
+# CAPITAL ROTATION TRACKER
+# -----------------------------------------------------------
+capital_rotation:
+  detection_window:
+    exit_detection_minutes: 30
+    entry_detection_minutes: 30
+    max_rotation_gap_minutes: 15
+  
+  thresholds:
+    min_exit_volume_usd: 25000
+    min_entry_volume_usd: 25000
+    whale_overlap_threshold: 0.3
+  
+  scoring:
+    rotation_detected_boost: 15
+    whale_involvement_boost: 10
+    volume_correlation_boost: 5
+
+# -----------------------------------------------------------
+# RUG PROBABILITY ESTIMATOR
+# -----------------------------------------------------------
+rug_probability:
+  indicators:
+    liquidity_removal_risk: 0.30
+    holder_concentration_risk: 0.25
+    contract_risk: 0.20
+    developer_risk: 0.15
+    volume_manipulation_risk: 0.10
+  
+  warning_levels:
+    low: {max_probability: 0.2, action: "monitor"}
+    medium: {max_probability: 0.4, action: "caution"}
+    high: {max_probability: 0.6, action: "warning"}
+    critical: {max_probability: 1.0, action: "alert"}
+  
+  early_warning_signs:
+    - "liquidity_unlock_imminent"
+    - "developer_wallet_movement"
+    - "sudden_holder_concentration"
+    - "volume_spike_without_price_action"
+
+# -----------------------------------------------------------
+# SMART EXIT ASSISTANT
+# -----------------------------------------------------------
+exit_assistant:
+  triggers:
+    liquidity_drop:
+      enabled: true
+      threshold_percent: 20
+      check_interval_seconds: 60
+    
+    whale_exit:
+      enabled: true
+      min_exit_usd: 20000
+      exit_velocity_threshold: 3
+    
+    risk_escalation:
+      enabled: true
+      risk_score_jump: 20
+      probability_threshold: 0.5
+    
+    profit_target:
+      enabled: true
+      target_multiplier: 3.0
+      trailing_stop_percent: 15
+  
+  alert_cooldown_seconds: 180
+
+# -----------------------------------------------------------
+# ALERT RANKING ENGINE
+# -----------------------------------------------------------
+alert_ranking:
+  buffer_window:
+    enabled: true
+    window_seconds: 300
+    max_alerts_in_window: 50
+  
+  composite_score_weights:
+    risk_score: -0.20
+    volume_quality: 0.25
+    buy_quality: 0.20
+    developer_reputation: 0.15
+    whale_activity: 0.15
+    early_buyer_quality: 0.05
+  
+  ranking_limits:
+    top_n_alerts: 10
+    min_score_to_alert: 50
+    max_alerts_per_minute: 5
+
+# -----------------------------------------------------------
+# MARKET REGIME ANALYZER
+# -----------------------------------------------------------
+market_regime:
+  analysis_window:
+    rolling_window_minutes: 60
+    update_interval_seconds: 300
+  
+  regime_types:
+    bull:
+      indicators:
+        price_trend: "up"
+        volume_trend: "up"
+        sentiment: "positive"
+      threshold_adjustments:
+        risk_tolerance: 1.2
+        volume_requirement: 0.8
+    
+    bear:
+      indicators:
+        price_trend: "down"
+        volume_trend: "mixed"
+        sentiment: "negative"
+      threshold_adjustments:
+        risk_tolerance: 0.7
+        volume_requirement: 1.3
+    
+    chop:
+      indicators:
+        price_trend: "sideways"
+        volume_trend: "down"
+        sentiment: "neutral"
+      threshold_adjustments:
+        risk_tolerance: 0.9
+        volume_requirement: 1.1
+    
+    volatile:
+      indicators:
+        price_trend: "erratic"
+        volume_trend: "spiky"
+        sentiment: "mixed"
+      threshold_adjustments:
+        risk_tolerance: 0.8
+        volume_requirement: 1.0
+
+# -----------------------------------------------------------
+# WATCH MODE SETTINGS
+# -----------------------------------------------------------
+watch_mode:
+  activation:
+    inline_button_enabled: true
+    command_enabled: true
+  
+  monitoring:
+    update_interval_seconds: 60
+    expiry_minutes: 30
+    max_concurrent: 50
+  
+  escalation:
+    price_change_threshold: 20
+    volume_spike_threshold: 3.0
+    risk_score_change: 15
+    alert_on_escalation: true
+  
+  notifications:
+    send_periodic_updates: true
+    send_escalation_alerts: true
+    include_all_metrics: false
+
+# -----------------------------------------------------------
+# SELF-DEFENSE MODE
+# -----------------------------------------------------------
 self_defense:
-  max_error_rate: 0.2
-  max_latency_ms: 2000
-  max_memory_percent: 85.0
-exit:
-  liquidity_drop_percent: 30
+  monitoring:
+    check_interval_seconds: 30
+    metrics_window_seconds: 300
+  
+  activation_thresholds:
+    api_error_rate: 0.1
+    avg_latency_ms: 5000
+    memory_usage_mb: 1800
+    cpu_usage_percent: 85
+    consecutive_failures: 5
+  
+  safe_mode_actions:
+    reduce_poll_frequency: true
+    pause_non_critical_features: true
+    increase_cooldowns: true
+    alert_admins: true
+  
+  recovery:
+    auto_recovery_enabled: true
+    recovery_check_interval_seconds: 60
+    exit_safe_mode_after_seconds: 300
 
-# New sections
-alert:
-  alert_cooldown_seconds: 600
-
-watch:
-  watch_expiry_seconds: 86400
+# -----------------------------------------------------------
+# HEALTH CHECK SETTINGS
+# -----------------------------------------------------------
+health_check:
+  enabled: true
+  interval_seconds: 300
+  
+  checks:
+    api_connectivity: true
+    bot_responsiveness: true
+    memory_usage: true
+    disk_space: true
+    database_connection: false
+  
+  thresholds:
+    max_memory_percent: 85
+    min_disk_space_gb: 5
+    max_response_time_ms: 2000

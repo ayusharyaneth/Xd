@@ -1,9 +1,31 @@
-aiohttp==3.9.3
-python-telegram-bot==20.8
-pydantic==2.6.3
-pydantic-settings==2.2.1
-PyYAML==6.0.1
-loguru==0.7.2
-psutil==5.9.8
-uvloop==0.19.0
-python-dotenv==1.0.1
+# ============================================================
+# DEXSCREENER INTELLIGENCE SYSTEM - DEPENDENCIES
+# ============================================================
+
+# Core Async
+aiohttp>=3.9.0
+asyncio>=3.4.3
+
+# Telegram Bot
+python-telegram-bot>=20.7
+
+# Configuration & Data Validation
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+PyYAML>=6.0.1
+python-dotenv>=1.0.0
+
+# Logging
+loguru>=0.7.2
+
+# System Monitoring
+psutil>=5.9.6
+
+# Scheduling
+APScheduler>=3.10.4
+
+# Optional Performance
+uvloop>=0.19.0; sys_platform != "win32"
+
+# Utilities
+base58>=2.1.1
