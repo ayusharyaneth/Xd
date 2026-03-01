@@ -1,7 +1,7 @@
 import asyncio
 import signal
 from loguru import logger
-from config.settings import settings
+from config.settings import setting
 from api.dexscreener import DexScreenerClient
 from bots.signal_bot import SignalBot
 from bots.alert_bot import AlertBot
