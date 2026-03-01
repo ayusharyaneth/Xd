@@ -27,19 +27,18 @@ git clone https://github.com/ayusharyaneth/dexy.git
 cd dexy
 ```
 
-2. ```bash
-pip install -r requirements.txt
-# or for Python 3 specifically
-pip3 install -r requirements.txt
+2. Create Screen
+   ```bash
+   python3 -m venv venv && source venv/bin/activate
 ```
 
-4. ```bash
-    python3 -m venv venv && source venv/bin/activate```
+3. Install Requirements
    
 6. ```pip install -r requirements.txt```
 7. Copy `.env.example` to `.env` and fill in Bot tokens and Chat IDs.
 8. Modify `strategy.yaml` to adjust thresholds.
-9. ```python3 main.py```
+9. ```python3 main.py
+```
 
 
 ## Deployment Guide Summary**
