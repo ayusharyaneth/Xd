@@ -1,29 +1,22 @@
 filters:
-  min_liquidity: 1000
-  min_fdv: 5000
+  min_liquidity_usd: 1000
   max_fdv: 5000000
-  min_volume_h1: 500
+  min_volume_h1: 100
+  max_age_hours: 24
 
 weights:
+  liquidity_score: 1.5
   volume_authenticity: 2.0
-  whale_presence: 1.5
+  whale_presence: 2.0
   dev_reputation: 1.0
-  cluster_suspicion: 2.5
-  buy_pressure: 1.2
 
 thresholds:
-  high_risk_score: 80
-  safe_mode_cpu_percent: 85
-  safe_mode_mem_percent: 85
-  whale_transaction_usd: 1000
-  cluster_time_window_sec: 2
-
-watch:
-  duration_minutes: 60
-  update_interval_minutes: 5
-  profit_trigger_percent: 100
-  stop_loss_percent: -30
+  risk_alert_level: 70
+  whale_txn_usd: 2000
+  safe_mode_cpu: 85
+  take_profit_percent: 100
+  stop_loss_percent: -25
 
 regime:
-  bull_volume_threshold: 1000000
-  bear_volume_threshold: 100000
+  bull_min_vol: 500000
+  bear_max_vol: 100000
