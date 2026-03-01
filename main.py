@@ -1,9 +1,9 @@
 import asyncio
 import signal
-from datetime import datetime
 from config.settings import settings, strategy
 from utils.logger import log, setup_logger
 from utils.state import state_manager
+from utils.helpers import get_current_datetime_str
 from api.dexscreener import DexScreenerAPI
 from engines.analysis import AnalysisEngine
 from bots.signal_bot import SignalBot
@@ -141,7 +141,7 @@ async def main():
     await signal_bot.initialize()
 
     # 2. Send Online Alert
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    timestamp = get_current_datetime_str() + " IST"
     try:
         await alert_bot.send_system_alert(
             f"🟢 **Bot Status: ONLINE**\n"
@@ -185,7 +185,7 @@ async def main():
         log.info("Initiating Graceful Shutdown...")
 
         # A. Send Offline Alert (while connection is still active)
-        timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        timestamp = get_current_datetime_str() + " IST"
         try:
             log.info("Sending offline alert...")
             await alert_bot.send_system_alert(
@@ -218,4 +218,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        pass # Handled by signal handler, this prevents ugly traceback on forced exit
+        pass
