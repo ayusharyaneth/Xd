@@ -98,31 +98,6 @@ Dexy will:
 
 ---
 
-## 📁 Project Structure
-
-```
-dexy/
-│
-├── main.py
-├── strategy.yaml
-├── requirements.txt
-├── .env.example
-├── logs/
-└── README.md
-```
-
----
-
-## 📝 Logs
-
-Logs (if enabled) are written to:
-
-```
-logs/system.log
-```
-
----
-
 ## 🔄 Updating
 
 ```bash
@@ -139,7 +114,3 @@ pip install -r requirements.txt
 - Never expose your `.env` file publicly  
 
 ---
-
-## 📄 License
-
-MIT License
