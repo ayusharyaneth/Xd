@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     ADMIN_CHAT_IDS: str
     CHANNEL_ID: int
     LOG_LEVEL: str = "INFO"
-    POLL_INTERVAL: int = 3
+    POLL_INTERVAL: int = 10  # Increased to prevent rate limits
     TARGET_CHAIN: str = "solana"
 
     class Config:
@@ -17,7 +17,10 @@ class Settings(BaseSettings):
         extra = "ignore"
 
     def get_admins(self) -> List[int]:
-        return [int(x.strip()) for x in self.ADMIN_CHAT_IDS.split(",")]
+        try:
+            return [int(x.strip()) for x in self.ADMIN_CHAT_IDS.split(",") if x.strip()]
+        except:
+            return []
 
 class StrategyConfig:
     def __init__(self):
@@ -25,8 +28,15 @@ class StrategyConfig:
 
     def _load(self) -> Dict[str, Any]:
         if not os.path.exists("strategy.yaml"):
-            # Fallback defaults if file missing
-            return {"filters": {}, "weights": {}, "thresholds": {}}
+            # Safe defaults if file missing
+            return {
+                "filters": {
+                    "min_liquidity_usd": 1000,
+                    "max_age_hours": 24  # Critical to prevent flooding old tokens
+                }, 
+                "weights": {}, 
+                "thresholds": {}
+            }
         with open("strategy.yaml", "r") as f:
             return yaml.safe_load(f)
 
