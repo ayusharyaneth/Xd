@@ -1,46 +1,42 @@
 import yaml
 import os
 from pydantic_settings import BaseSettings
-from typing import Dict, Any
+from typing import List, Dict, Any
 
-class EnvSettings(BaseSettings):
+class Settings(BaseSettings):
     SIGNAL_BOT_TOKEN: str
     ALERT_BOT_TOKEN: str
-    ADMIN_CHAT_ID: int
+    ADMIN_CHAT_IDS: str
     CHANNEL_ID: int
     LOG_LEVEL: str = "INFO"
-    POLL_INTERVAL: int = 5
-    MAX_RETRIES: int = 3
-    DEXSCREENER_API_URL: str
+    POLL_INTERVAL: int = 3
+    TARGET_CHAIN: str = "solana"
 
     class Config:
         env_file = ".env"
         extra = "ignore"
 
-class ConfigManager:
-    def __init__(self):
-        self.env = EnvSettings()
-        self.strategy = self._load_strategy()
+    def get_admins(self) -> List[int]:
+        return [int(x.strip()) for x in self.ADMIN_CHAT_IDS.split(",")]
 
-    def _load_strategy(self) -> Dict[str, Any]:
+class StrategyConfig:
+    def __init__(self):
+        self._data = self._load()
+
+    def _load(self) -> Dict[str, Any]:
         if not os.path.exists("strategy.yaml"):
-            raise FileNotFoundError("strategy.yaml not found")
-        with open("strategy.yaml", 'r') as f:
+            # Fallback defaults if file missing
+            return {"filters": {}, "weights": {}, "thresholds": {}}
+        with open("strategy.yaml", "r") as f:
             return yaml.safe_load(f)
 
     @property
-    def filters(self): return self.strategy.get('filters', {})
-    
+    def filters(self): return self._data.get('filters', {})
     @property
-    def weights(self): return self.strategy.get('weights', {})
-    
+    def weights(self): return self._data.get('weights', {})
     @property
-    def thresholds(self): return self.strategy.get('thresholds', {})
+    def thresholds(self): return self._data.get('thresholds', {})
 
-    @property
-    def watch(self): return self.strategy.get('watch', {})
-    
-    @property
-    def regime(self): return self.strategy.get('regime', {})
-
-settings = ConfigManager()
+# Singletons
+settings = Settings()
+strategy = StrategyConfig()
