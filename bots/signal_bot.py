@@ -22,8 +22,7 @@ def admin_restricted(func):
         if not user:
             return
 
-        # Use the new property accessor for admin IDs
-        admin_ids = settings.admin_list
+        admin_ids = settings.get_admins()
         
         if user.id not in admin_ids:
             # 1. Reject User
@@ -244,7 +243,7 @@ class SignalBot:
         timestamp = get_ist_time_str("%H:%M IST")
 
         text = (
-            f"📡 **TERMINAL**\n"
+            f"📡 **DEXSCREENER TERMINAL**\n"
             f"────────────────\n\n"
             f"{status_emoji} **Status:** `Online`\n"
             f"⚡ **Heartbeat:** `{heartbeat}`\n"
@@ -292,7 +291,7 @@ class SignalBot:
             timestamp = get_ist_time_str("%H:%M IST")
 
             text = (
-                f"📡 **DEXSCREENER TERMINAL**\n"
+                f"📡 **TERMINAL**\n"
                 f"────────────────\n\n"
                 f"{status_emoji} **Status:** `Online`\n"
                 f"⚡ **Latency:** `{latency:.0f} ms`\n"
@@ -445,13 +444,33 @@ class SignalBot:
         await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
     async def broadcast_signal(self, analysis: dict):
+        """Sends the formatted signal to the channel"""
+        
+        # Calculate changes for display
+        metrics = analysis.get('metrics', {})
+        vol_h1 = metrics.get('volume_h1', 0)
+        p_change = metrics.get('price_change_h1', 0)
+        
+        # Format numbers
+        liq_fmt = f"${analysis.get('liquidity', 0):,.0f}"
+        fdv_fmt = f"${analysis.get('fdv', 0):,.0f}"
+        vol_fmt = f"${vol_h1:,.0f}"
+        age_fmt = f"{analysis.get('age_hours', 0)}h"
+        
+        # Determine trend icon
+        trend = "📈" if p_change >= 0 else "📉"
+        
         msg = (
             f"💎 **GEM DETECTED** | {analysis['baseToken']['symbol']}\n"
             f"────────────────\n"
-            f"💰 Price: ${analysis.get('priceUsd', '0')}\n"
-            f"💧 Liquidity: ${analysis.get('liquidity', 0):,.0f}\n"
-            f"📊 Score: {analysis['risk']['score']}/100\n"
-            f"🐋 Whale: {'YES' if analysis['whale']['detected'] else 'NO'}\n"
+            f"💰 **Price:** `${analysis.get('priceUsd', '0')}`\n"
+            f"💧 **Liquidity:** `{liq_fmt}`\n"
+            f"📊 **FDV:** `{fdv_fmt}`\n"
+            f"⏳ **Age:** `{age_fmt}`\n"
+            f"🌊 **Vol (1H):** `{vol_fmt}`\n"
+            f"{trend} **Change (1H):** `{p_change}%`\n"
+            f"🎯 **Score:** `{analysis['risk']['score']}/100`\n"
+            f"🐋 **Whale:** `{'YES 🚨' if analysis['whale']['detected'] else 'NO'}`\n"
             f"────────────────\n"
             f"`{analysis['address']}`"
         )
