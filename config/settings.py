@@ -379,12 +379,14 @@ class Settings(BaseSettings):
     DEXSCREENER_PAIRS_ENDPOINT: str = Field(default="/dex/pairs", env="DEXSCREENER_PAIRS_ENDPOINT")
     DEXSCREENER_TOKENS_ENDPOINT: str = Field(default="/dex/tokens", env="DEXSCREENER_TOKENS_ENDPOINT")
     
-    # RPC Configuration
+    # RPC Configuration (support multiple common naming conventions)
     RPC_ENDPOINT: str = Field(default="https://api.mainnet-beta.solana.com", env="RPC_ENDPOINT")
     RPC_BACKUP_ENDPOINT: str = Field(default="https://solana-api.projectserum.com", env="RPC_BACKUP_ENDPOINT")
+    rpc_base_url: Optional[str] = Field(default=None, env="rpc_base_url")  # Alternative name
     
-    # Polling Configuration
+    # Polling Configuration (support multiple common naming conventions)
     POLL_INTERVAL_SECONDS: int = Field(default=30, env="POLL_INTERVAL_SECONDS")
+    poll_interval: Optional[int] = Field(default=None, env="poll_interval")  # Alternative name
     WATCH_UPDATE_INTERVAL_SECONDS: int = Field(default=60, env="WATCH_UPDATE_INTERVAL_SECONDS")
     HEALTH_CHECK_INTERVAL_SECONDS: int = Field(default=300, env="HEALTH_CHECK_INTERVAL_SECONDS")
     
@@ -418,6 +420,8 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"  # Ignore extra fields in .env
+        case_sensitive = False  # Allow case-insensitive matching
 
 
 # ============================================================
