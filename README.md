@@ -18,31 +18,6 @@ The system operates asynchronously using `asyncio` and `aiohttp`.
 - **Watch Mode**: Clicking '👁 Watch' tracks the token and utilizes the Exit Assistant.
 - **Self-Defense Mode**: Auto-pauses polling if error rates exceed limits defined in `strategy.yaml`.
 
-## Examples
-
-**Example Alert Message**
-🚀 **NEW ALPHA DETECTED** 🚀
-**Symbol:** PEPE2
-**Address:** `0x123...abc`
-**Price:** 0.000045 USD
-**Score:** 85.50/100
-[🔄 Refresh] [👁 Watch]
-
-**Example Watch Message**
-⚠️ **WATCH ESCALATION** ⚠️
-Token: `0x123...abc`
-Reason: Price dropped > 30% in 1h
-Action: Consider Exit.
-
-**Example /ping Output**
-🏓 **System Status**
-Status: 🟢 Healthy
-Latency: 45.20ms
-CPU: 12.5%
-Memory: 45.0%
-Market Regime: NORMAL
-Safe Mode: 🟢 INACTIVE
-Active Watches: 3
 
 ## Setup Guide
 1. `git clone <repo>`
@@ -51,23 +26,3 @@ Active Watches: 3
 4. Copy `.env.example` to `.env` and fill in Bot tokens and Chat IDs.
 5. Modify `strategy.yaml` to adjust thresholds.
 6. `python main.py`
-
-## Ubuntu VPS Deployment (systemd)
-
-Create `/etc/systemd/system/dexscreener-bot.service`:
-
-```ini
-[Unit]
-Description=DexScreener Intelligence Bot
-After=network.target
-
-[Service]
-User=root
-WorkingDirectory=/path/to/project-root
-Environment="PATH=/path/to/project-root/venv/bin"
-ExecStart=/path/to/project-root/venv/bin/python main.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
