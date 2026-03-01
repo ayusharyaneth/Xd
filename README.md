@@ -397,8 +397,4 @@ sudo journalctl -u dex-intel -f
 | `/watchlist` | View all watched tokens |
 | `/regime` | Current market regime analysis |
 
-### Inline Buttons
-
-| Button | Action |
-|--------|--------|
-| 🔄 Refresh | Refresh to
+---
