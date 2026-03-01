@@ -1,13 +1,22 @@
 import sys
 from loguru import logger
 
-def setup_logger(log_level: str = "INFO"):
+def setup_logger(level: str = "INFO"):
     logger.remove()
+    # Console Handler
     logger.add(
         sys.stderr,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>",
-        level=log_level,
-        colorize=True
+        level=level
     )
-    logger.add("logs/system.log", rotation="50 MB", retention="10 days", level="DEBUG")
+    # File Handler (Rotation enabled)
+    logger.add(
+        "logs/app.log",
+        rotation="100 MB",
+        retention="7 days",
+        level="DEBUG",
+        compression="zip"
+    )
     return logger
+
+log = setup_logger(settings.LOG_LEVEL)
