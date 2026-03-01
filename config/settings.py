@@ -1,113 +1,59 @@
 import os
-import sys
-import yaml
-from pathlib import Path
-from pydantic_settings import BaseSettings
-from pydantic import Field, ValidationError
-from dotenv import load_dotenv
 import logging
+from dotenv import load_dotenv
 
-logger = logging.getLogger(__name__)
+# Load environment variables from the .env file in the root directory
+load_dotenv()
 
-# Load .env with explicit path
-env_path = Path(__file__).parent.parent / ".env"
-if env_path.exists():
-    load_dotenv(dotenv_path=env_path)
-    logger.info(f"Loaded .env from {env_path}")
-else:
-    load_dotenv()  # Try default locations
-    logger.warning(f".env not found at {env_path}, trying system env")
+# ---------------------------------------------------------
+# Telegram Bot Configurations
+# ---------------------------------------------------------
+SIGNAL_BOT_TOKEN = os.getenv("SIGNAL_BOT_TOKEN")
+ALERT_BOT_TOKEN = os.getenv("ALERT_BOT_TOKEN")
 
-def load_yaml_config():
-    """Load strategy.yaml with better path resolution"""
-    # Try multiple path strategies
-    possible_paths = [
-        Path("strategy.yaml"),  # Current directory
-        Path(__file__).parent.parent / "strategy.yaml",  # Relative to this file
-        Path.cwd() / "strategy.yaml",  # Working directory
-    ]
+# Chat ID where the Alert Bot will broadcast critical warnings
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
+
+# ---------------------------------------------------------
+# System & Watch Configurations
+# ---------------------------------------------------------
+# How often to poll DexScreener (in seconds)
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "15")) 
+
+# Logging Level (INFO, DEBUG, WARNING, ERROR)
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+# ---------------------------------------------------------
+# DexScreener API Configurations
+# ---------------------------------------------------------
+DEXSCREENER_BASE_URL = "https://api.dexscreener.com/latest/dex"
+REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "10"))
+
+# ---------------------------------------------------------
+# Intelligence System Thresholds
+# ---------------------------------------------------------
+# Minimum transaction size in USD to trigger a Whale Alert
+WHALE_BUY_THRESHOLD_USD = float(os.getenv("WHALE_BUY_THRESHOLD_USD", "50000.0"))
+
+# Probability threshold (0-100) to flag a newly listed token as a potential rug pull
+RUG_RISK_THRESHOLD = float(os.getenv("RUG_RISK_THRESHOLD", "85.0"))
+
+# ---------------------------------------------------------
+# Startup Validation
+# ---------------------------------------------------------
+def validate_settings():
+    """Ensure all critical environment variables are loaded before startup."""
+    missing_keys = []
     
-    for path in possible_paths:
-        try:
-            if path.exists():
-                with open(path, "r") as f:
-                    config = yaml.safe_load(f) or {}
-                    logger.info(f"Loaded strategy config from {path}")
-                    return config
-        except Exception as e:
-            logger.warning(f"Failed to load {path}: {e}")
-            continue
-    
-    logger.warning("No strategy.yaml found, using defaults")
-    return {}
-
-yaml_config = load_yaml_config()
-
-class Settings(BaseSettings):
-    # Required fields with validation error messages
-    SIGNAL_BOT_TOKEN: str = Field(
-        default=None,
-        description="Telegram token for signal bot (@BotFather)"
-    )
-    ALERT_BOT_TOKEN: str = Field(
-        default=None, 
-        description="Telegram token for alert bot (@BotFather)"
-    )
-    SIGNAL_CHAT_ID: str = Field(
-        default=None,
-        description="Chat ID for signal messages"
-    )
-    ALERT_CHAT_ID: str = Field(
-        default=None,
-        description="Chat ID for alert messages"
-    )
-    
-    # Optional fields with sensible defaults
-    DEXSCREENER_API_BASE: str = Field(default="https://api.dexscreener.com/latest/dex")
-    RPC_BASE_URL: str = Field(default="http://localhost:8545")
-    POLL_INTERVAL: int = Field(default=60, ge=5, le=3600)
-    
-    # Strategy configs with safe defaults
-    MAX_FDV: float = Field(default=yaml_config.get('risk', {}).get('max_fdv', 10000000))
-    MIN_LIQUIDITY: float = Field(default=yaml_config.get('risk', {}).get('min_liquidity', 5000))
-    MIN_WHALE_TRADE: float = Field(default=yaml_config.get('whale', {}).get('min_trade_usd', 10000))
-    MAX_ERROR_RATE: float = Field(default=yaml_config.get('self_defense', {}).get('max_error_rate', 0.2))
-    MAX_LATENCY_MS: float = Field(default=yaml_config.get('self_defense', {}).get('max_latency_ms', 2000))
-    MAX_MEMORY_PERCENT: float = Field(default=yaml_config.get('self_defense', {}).get('max_memory_percent', 85.0))
-    ALERT_COOLDOWN_SECONDS: int = Field(default=yaml_config.get('alert', {}).get('alert_cooldown_seconds', 600))
-    WATCH_EXPIRY_SECONDS: int = Field(default=yaml_config.get('watch', {}).get('watch_expiry_seconds', 86400))
-
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
-        case_sensitive = True
-
-# Initialize with validation
-try:
-    settings = Settings()
-    
-    # Post-init validation
-    missing = []
-    if not settings.SIGNAL_BOT_TOKEN:
-        missing.append("SIGNAL_BOT_TOKEN")
-    if not settings.ALERT_BOT_TOKEN:
-        missing.append("ALERT_BOT_TOKEN")
-    if not settings.SIGNAL_CHAT_ID:
-        missing.append("SIGNAL_CHAT_ID")
-    if not settings.ALERT_CHAT_ID:
-        missing.append("ALERT_CHAT_ID")
-    
-    if missing:
-        logger.error(f"Missing required environment variables: {', '.join(missing)}")
-        logger.error("Please ensure these are set in your .env file")
-        # Don't exit - let the bot fail gracefully when trying to send first message
-        # So user can see specific error about which bot failed
+    if not SIGNAL_BOT_TOKEN:
+        missing_keys.append("SIGNAL_BOT_TOKEN")
+    if not ALERT_BOT_TOKEN:
+        missing_keys.append("ALERT_BOT_TOKEN")
         
-    logger.info("Settings loaded successfully")
-    
-except ValidationError as e:
-    logger.error(f"Configuration validation error: {e}")
-    raise SystemExit(1)
-except Exception as e:
-    logger.error(f"Unexpected error loading settings: {e}")
-    raise
+    if missing_keys:
+        error_msg = f"CRITICAL Startup Error: Missing environment variables: {', '.join(missing_keys)}"
+        logging.error(error_msg)
+        raise ValueError(error_msg)
+
+# Run validation immediately upon import
+validate_settings()
