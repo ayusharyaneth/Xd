@@ -1,49 +1,145 @@
-# DexScreener Intelligence System
+# Dexy
 
-A production-grade Python system that monitors newly listed tokens, applies advanced behavioral and intelligence engines, and pushes interactive alerts to Telegram.
+Production-grade DexScreener token intelligence monitor with adaptive strategies.
 
-## Architecture Explanation
-The system operates asynchronously using `asyncio` and `aiohttp`. 
-- **API Layer**: Polls DexScreener periodically.
-- **Engines Layer**: Runs tokens through a two-stage filter. First, basic risk (liquidity/FDV). Second, deep intelligence (authenticity, rug probability, whales).
-- **Ranking**: Buffers alerts and only sends the highest-scoring tokens to reduce noise.
-- **Bot Layer**: 
-  - *Signal Bot*: Interacts with users, sends alpha, handles inline buttons (Watch/Refresh), and the `/ping` command.
-  - *Alert Bot*: Dedicated to critical system failures and Safe Mode escalation.
-- **System Layer**: Monitors CPU, RAM, and API latency, triggering Self-Defense mode if thresholds are breached.
+Dexy monitors DexScreener for token events and sends Telegram alerts based on configurable strategy rules.
 
-## Features
-- **Two-Stage Configurable Filters**: Fast rejection of low-liquidity scams.
-- **Rug Probability Estimator**: Combines clustering, risk, and dev rep into a 0-100% score.
-- **Watch Mode**: Clicking '👁 Watch' tracks the token and utilizes the Exit Assistant.
-- **Self-Defense Mode**: Auto-pauses polling if error rates exceed limits defined in `strategy.yaml`.
+---
 
+## 🚀 Features
 
-## Setup Guide
+- Real-time DexScreener monitoring  
+- Configurable strategy engine (`strategy.yaml`)  
+- Telegram alert integration  
+- Environment-based configuration  
+- Structured logging  
 
-1. Clone Repository
+---
+
+## 📦 Requirements
+
+- Python 3.11+
+- Git
+- Linux / macOS / WSL (Windows via WSL recommended)
+
+---
+
+## ⚙️ Installation
+
+### 1. Clone Repository
+
 ```bash
 git clone https://github.com/ayusharyaneth/dexy.git
 cd dexy
 ```
 
-2. Create Screen
-   ```bash
-   python3 -m venv venv && source venv/bin/activate
+### 2. Create Virtual Environment
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
 ```
 
-3. Install Requirements
-   
-6. ```pip install -r requirements.txt```
-7. Copy `.env.example` to `.env` and fill in Bot tokens and Chat IDs.
-8. Modify `strategy.yaml` to adjust thresholds.
-9. ```python3 main.py
+### 3. Upgrade pip (Recommended)
+
+```bash
+pip install --upgrade pip
 ```
 
+### 4. Install Dependencies
 
-## Deployment Guide Summary**
+```bash
+pip install -r requirements.txt
+```
 
-1. **Prerequisites:** Ensure Python 3.11+ is installed on your environment.
-2. **Configuration:** The system utilizes a Pydantic hybrid config model. Core credentials (Bot Tokens, Chat IDs) must go into `.env`. Behavioral weights go into `strategy.yaml`. If you define a variable in `.env` that exists in strategy.yaml` (like `MAX_FDV`), the .env` value takes strict precedence.
-3. **Execution:** Running `main.py` will initialize the application, configure uvloop (if available in your OS) for maximum performance, spin up both Telegram application loops, and begin the core async polling loops simultaneously.
-4. **Maintenance:** Monitor `logs/ system.log (handled by Loguru with built-in rotation) for deep debugging. Use the `/ping command in your Signal Bot chat for real-time health telemetry.
+---
+
+## 🔐 Environment Configuration
+
+Copy the example environment file:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and configure:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_CHAT_ID`
+- Any additional required keys
+
+If a value exists in both `.env` and `strategy.yaml`, `.env` takes priority.
+
+---
+
+## 🧠 Strategy Configuration
+
+Edit:
+
+```
+strategy.yaml
+```
+
+Modify thresholds, filters, or risk parameters according to your trading logic.
+
+---
+
+## ▶️ Running Dexy
+
+```bash
+python3 main.py
+```
+
+Dexy will:
+
+- Poll DexScreener  
+- Apply strategy filters  
+- Send alerts to configured Telegram chat  
+
+---
+
+## 📁 Project Structure
+
+```
+dexy/
+│
+├── main.py
+├── strategy.yaml
+├── requirements.txt
+├── .env.example
+├── logs/
+└── README.md
+```
+
+---
+
+## 📝 Logs
+
+Logs (if enabled) are written to:
+
+```
+logs/system.log
+```
+
+---
+
+## 🔄 Updating
+
+```bash
+git pull origin main
+pip install -r requirements.txt
+```
+
+---
+
+## ⚠️ Notes
+
+- Ensure Python 3.11+ is installed  
+- Always validate strategy parameters before running in production  
+- Never expose your `.env` file publicly  
+
+---
+
+## 📄 License
+
+MIT License
