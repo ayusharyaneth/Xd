@@ -7,3 +7,5 @@ loguru==0.7.2
 psutil==5.9.6
 python-dotenv==1.0.0
 ujson==5.9.0
+tenacity==8.2.3
+fake-useragent==1.4.0
