@@ -8,41 +8,54 @@ class AnalysisEngine:
     @staticmethod
     def analyze_token(pair_data: dict):
         """
-        Orchestrates the analysis pipeline.
-        Returns None if filtered out, otherwise returns Analysis Result.
+        Orchestrates the analysis pipeline with detailed debug logging 
+        to diagnose why tokens are being dropped.
         """
-        # --- 1. HARD FILTERS (The Gatekeeper) ---
+        token_symbol = pair_data.get('baseToken', {}).get('symbol', 'UNKNOWN')
+        addr = pair_data.get('pairAddress', 'UNKNOWN')
+
+        # --- 1. DATA VALIDITY CHECK ---
+        liq_raw = pair_data.get('liquidity', {}).get('usd', 0)
+        if liq_raw is None: liq_raw = 0
+        liq = float(liq_raw)
+
+        # --- 2. HARD FILTERS (The Gatekeeper) ---
         
         # A. Liquidity Filter
-        liq = float(pair_data.get('liquidity', {}).get('usd', 0))
         min_liq = strategy.filters.get('min_liquidity_usd', 1000)
         if liq < min_liq:
+            log.debug(f"DROP [{token_symbol}]: Liq ${liq:.0f} < ${min_liq}")
             return None
 
-        # B. Age Filter (Crucial for preventing flooding)
-        created_at_ms = pair_data.get('pairCreatedAt', 0)
+        # B. Age Filter
+        # DexScreener often provides pairCreatedAt in milliseconds
+        created_at_ms = pair_data.get('pairCreatedAt')
+        age_hours = 0
+        
         if created_at_ms:
-            # Convert ms to hours
             age_hours = (time.time() * 1000 - created_at_ms) / (1000 * 3600)
             max_age = strategy.filters.get('max_age_hours', 24)
             
             if age_hours > max_age:
-                # Token is too old, ignore it
+                log.debug(f"DROP [{token_symbol}]: Age {age_hours:.1f}h > {max_age}h")
                 return None
         else:
-            # If no creation time, assume old and skip to be safe
-            return None
+            # If API doesn't return creation time, we can either skip or pass.
+            # For safety, strict mode skips.
+            if strategy.thresholds.get('strict_filtering', True):
+                log.debug(f"DROP [{token_symbol}]: No creation data (Strict Mode)")
+                return None
 
-        # --- 2. Detailed Analysis ---
+        # --- 3. Detailed Analysis ---
         risk = RiskEngine.evaluate(pair_data)
         
-        # If Risk Engine flags it as unsafe immediately, return early
         if not risk['is_safe']:
+            log.debug(f"DROP [{token_symbol}]: Risk Filter ({risk['reasons']})")
             return None
 
         whale = WhaleEngine.analyze(pair_data)
         
-        # --- 3. Authenticity (Simple Wash Trade Check) ---
+        # --- 4. Authenticity ---
         vol_h24 = float(pair_data.get('volume', {}).get('h24', 0))
         txns = pair_data.get('txns', {}).get('h24', {})
         buys = txns.get('buys', 0)
@@ -51,7 +64,7 @@ class AnalysisEngine:
         buy_sell_ratio = buys / sells if sells > 0 else 100
         
         return {
-            "address": pair_data.get('pairAddress'),
+            "address": addr,
             "baseToken": pair_data.get('baseToken'),
             "priceUsd": pair_data.get('priceUsd'),
             "liquidity": liq,
