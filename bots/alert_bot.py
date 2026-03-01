@@ -1,6 +1,7 @@
 from telegram.ext import Application
 from config.settings import settings
 from utils.logger import log
+import asyncio
 
 class AlertBot:
     """
@@ -12,6 +13,10 @@ class AlertBot:
     async def initialize(self):
         await self.app.initialize()
         await self.app.start()
+        # Admin bot doesn't strictly need to poll if it only SENDS messages, 
+        # but if we want it to respond to admin commands later, we start polling.
+        # We use drop_pending_updates to ensure clean start.
+        await self.app.updater.start_polling(drop_pending_updates=True)
 
     async def send_system_alert(self, message: str):
         for admin_id in settings.get_admins():
@@ -25,5 +30,8 @@ class AlertBot:
                 log.error(f"Failed to send alert to {admin_id}: {e}")
 
     async def shutdown(self):
-        await self.app.stop()
+        if self.app.updater.running:
+            await self.app.updater.stop()
+        if self.app.running:
+            await self.app.stop()
         await self.app.shutdown()
