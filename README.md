@@ -20,7 +20,7 @@ The system operates asynchronously using `asyncio` and `aiohttp`.
 
 
 ## Setup Guide
-1. `git clone <repo>`
+1. `git clone https://github.com/ayusharyaneth/dexy.git`
 2. `python -m venv venv && source venv/bin/activate`
 3. `pip install -r requirements.txt`
 4. Copy `.env.example` to `.env` and fill in Bot tokens and Chat IDs.
