@@ -2,14 +2,15 @@ import yaml
 import os
 import asyncio
 from pydantic_settings import BaseSettings
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, Optional
+from pydantic import Field, field_validator
 
 class Settings(BaseSettings):
     SIGNAL_BOT_TOKEN: str
     ALERT_BOT_TOKEN: str
-    ADMIN_CHAT_IDS: str
+    ADMIN_IDS: str
     CHANNEL_ID: int
-    LOG_CHANNEL_ID: int  # Dedicated channel for security logs
+    LOG_CHANNEL_ID: Optional[int] = Field(default=None, description="Channel ID for security logs")
     LOG_LEVEL: str = "INFO"
     POLL_INTERVAL: int = 15
     TARGET_CHAIN: str = "solana"
@@ -18,11 +19,22 @@ class Settings(BaseSettings):
         env_file = ".env"
         extra = "ignore"
 
-    def get_admins(self) -> List[int]:
-        try:
-            return [int(x.strip()) for x in self.ADMIN_CHAT_IDS.split(",") if x.strip()]
-        except:
+    @property
+    def admin_list(self) -> List[int]:
+        """Parses comma-separated ADMIN_IDS string into a list of integers."""
+        if not self.ADMIN_IDS:
             return []
+        try:
+            return [int(x.strip()) for x in self.ADMIN_IDS.split(",") if x.strip()]
+        except ValueError:
+            return []
+
+    @field_validator("LOG_CHANNEL_ID", mode="before")
+    @classmethod
+    def validate_log_channel(cls, v):
+        if v == "" or v is None:
+            return None
+        return int(v)
 
 class StrategyConfig:
     def __init__(self):
@@ -55,7 +67,6 @@ class StrategyConfig:
         try:
             with open(self.filepath, "r") as f:
                 loaded = yaml.safe_load(f) or {}
-                # Merge defaults with loaded data to ensure structure
                 for section in defaults:
                     if section not in loaded:
                         loaded[section] = defaults[section]
