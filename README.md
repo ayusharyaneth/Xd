@@ -26,3 +26,9 @@ The system operates asynchronously using `asyncio` and `aiohttp`.
 4. Copy `.env.example` to `.env` and fill in Bot tokens and Chat IDs.
 5. Modify `strategy.yaml` to adjust thresholds.
 6. `python main.py`
+
+
+## Deployment Guide Summary**
+
+1. **Prerequisites:** Ensure Python 3.11+ is installed on your environment.
+2. **Configuration:** The system utilizes a Pydantic hybrid config model. Core credentials (Bot Tokens, Chat IDs) must go into `.env`. Behavioral weights go into `strategy.yaml`. If you define a variable in `.env` that exists in strategy.yaml` (like `MAX_FDV`), the .env` value takes strict precedence. 3. **Execution:** Running `main.py` will initialize the application, configure uvloop (if available in your OS) for maximum performance, spin up both Telegram application loops, and begin the core async polling loops simultaneously. 4. **Maintenance:** Monitor `logs/ system.log (handled by Loguru with built-in rotation) for deep debugging. Use the `/ping command in your Signal Bot chat for real-time health telemetry.
