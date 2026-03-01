@@ -17,3 +17,10 @@ self_defense:
   max_memory_percent: 85.0
 exit:
   liquidity_drop_percent: 30
+
+# New sections
+alert:
+  alert_cooldown_seconds: 600
+
+watch:
+  watch_expiry_seconds: 86400
