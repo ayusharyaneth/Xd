@@ -244,7 +244,7 @@ class SignalBot:
         timestamp = get_ist_time_str("%H:%M IST")
 
         text = (
-            f"📡 **DEXSCREENER TERMINAL**\n"
+            f"📡 **TERMINAL**\n"
             f"────────────────\n\n"
             f"{status_emoji} **Status:** `Online`\n"
             f"⚡ **Heartbeat:** `{heartbeat}`\n"
