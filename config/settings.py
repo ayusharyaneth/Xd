@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     LOG_CHANNEL_ID: Optional[int] = Field(default=None, description="Channel ID for security logs")
     LOG_LEVEL: str = "INFO"
     POLL_INTERVAL: int = 15
-    TARGET_CHAIN: str = "solana"
+    TARGET_CHAIN: str = Field(default="solana", description="Default blockchain to monitor")
 
     class Config:
         env_file = ".env"
