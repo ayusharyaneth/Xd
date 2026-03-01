@@ -14,6 +14,7 @@ import time
 def admin_restricted(func):
     """
     Decorator to restrict handler access to admin users only.
+    Unauthorized attempts are logged to a dedicated Telegram channel, NOT the console.
     """
     @wraps(func)
     async def wrapper(self, update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
@@ -24,18 +25,38 @@ def admin_restricted(func):
         admin_ids = settings.get_admins()
         
         if user.id not in admin_ids:
-            # Log unauthorized attempt
-            timestamp = get_ist_time_str()
-            log.warning(f"⛔ Unauthorized access attempt by User ID: {user.id} ({user.username}) at {timestamp}")
-            
-            # Reject request
-            rejection_text = "🚫 **ACCESS DENIED**\nThis is a Private Project built for Personal use."
+            # 1. Reject User
+            rejection_text = "🚫 This is a Private Project built for Personal use."
             
             if update.callback_query:
                 await update.callback_query.answer("🚫 Access Denied", show_alert=True)
-                # Optional: Edit message to show rejection if it persists
             elif update.message:
                 await update.message.reply_text(rejection_text, parse_mode='Markdown')
+
+            # 2. Log to Dedicated Channel (Silent Log)
+            try:
+                action_type = "Command" if update.message else "Callback"
+                content = update.message.text if update.message else update.callback_query.data
+                username = f"@{user.username}" if user.username else "N/A"
+                timestamp = get_ist_time_str()
+                
+                log_msg = (
+                    f"🚨 **Unauthorized Access Attempt**\n\n"
+                    f"👤 **User ID:** `{user.id}`\n"
+                    f"🧾 **Username:** {username}\n"
+                    f"📩 **Action:** `{action_type}: {content}`\n"
+                    f"🕒 **Time:** `{timestamp}`\n"
+                    f"📡 **Chat ID:** `{update.effective_chat.id}`"
+                )
+                
+                await context.bot.send_message(
+                    chat_id=settings.LOG_CHANNEL_ID,
+                    text=log_msg,
+                    parse_mode='Markdown'
+                )
+            except Exception as e:
+                # Fallback: only log internal error if the log channel fails
+                log.error(f"Failed to send security log: {e}")
             
             # Stop execution
             return
@@ -77,18 +98,10 @@ class SignalBot:
 
     @admin_restricted
     async def cmd_ping(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Handles /ping command (Sends new message).
-        """
         msg_date = update.message.date
-        # Ensure timezone compatibility for latency calc
-        # Using simple timestamp diff for robustness
         now_ts = time.time()
         msg_ts = msg_date.timestamp()
-        
-        latency_ms = (now_ts - msg_ts) * 1000
-        # Prevent negative latency if clocks skew slightly
-        latency_ms = max(0, latency_ms)
+        latency_ms = max(0, (now_ts - msg_ts) * 1000)
         
         text, reply_markup = self._generate_diagnostics_content(latency_ms)
         await update.message.reply_text(text, parse_mode='Markdown', reply_markup=reply_markup)
@@ -212,11 +225,7 @@ class SignalBot:
     # --- UI Renderers ---
 
     async def _render_diagnostics_panel(self, message):
-        """
-        Renders diagnostics by editing the message (Inline Button Action).
-        """
         start = time.perf_counter()
-        # Simulate check
         sys_metrics = SystemHealth.get_metrics() 
         end = time.perf_counter()
         latency_ms = (end - start) * 1000
