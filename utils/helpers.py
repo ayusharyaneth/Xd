@@ -4,13 +4,20 @@ from zoneinfo import ZoneInfo
 # Define Timezone globally
 IST = ZoneInfo("Asia/Kolkata")
 
-def get_ist_time_str(fmt: str = "%H:%M:%S IST") -> str:
-    """Returns current time in IST formatted as string."""
-    return datetime.now(IST).strftime(fmt)
-
 def get_ist_datetime() -> datetime:
     """Returns current timezone-aware datetime object in IST."""
     return datetime.now(IST)
+
+def get_ist_time_str(fmt: str = "%H:%M:%S IST") -> str:
+    """Returns current time in IST formatted as string. Default: HH:MM:SS IST"""
+    return get_ist_datetime().strftime(fmt)
+
+def get_current_datetime_str(fmt: str = "%Y-%m-%d %H:%M:%S IST") -> str:
+    """
+    Returns current full datetime in IST formatted as string.
+    Default: YYYY-MM-DD HH:MM:SS IST
+    """
+    return get_ist_datetime().strftime(fmt)
 
 def format_number(num):
     if not num: return "0"
