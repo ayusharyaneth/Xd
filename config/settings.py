@@ -29,6 +29,10 @@ class Settings(BaseSettings):
         except ValueError:
             return []
 
+    # Alias method to support existing calls to get_admins()
+    def get_admins(self) -> List[int]:
+        return self.admin_list
+
     @field_validator("LOG_CHANNEL_ID", mode="before")
     @classmethod
     def validate_log_channel(cls, v):
