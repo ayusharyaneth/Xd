@@ -3,12 +3,12 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 from config.settings import settings, strategy
 from utils.logger import log
 from utils.state import state_manager
+from utils.helpers import get_current_time_str, get_time_obj, TIMEZONE
 from api.dexscreener import DexScreenerAPI
 from system.health import SystemHealth
-from engines.analysis import AnalysisEngine
-from datetime import datetime
 import asyncio
 import time
+from datetime import datetime
 
 class SignalBot:
     def __init__(self, api: DexScreenerAPI):
@@ -42,40 +42,19 @@ class SignalBot:
 
     async def cmd_ping(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
-        Structured System Diagnostics Panel.
+        Triggered via /ping command. Sends a new message.
         """
-        start_time = time.time()
-        msg = await update.message.reply_text("📡 Calculating metrics...")
-        end_time = time.time()
+        # Calculate command processing latency
+        request_time = update.message.date.replace(tzinfo=TIMEZONE)
+        now = datetime.now(TIMEZONE)
+        latency = (now - request_time).total_seconds() * 1000
         
-        # Metrics
-        latency_ms = (end_time - start_time) * 1000
-        sys_metrics = SystemHealth.get_metrics()
-        watches = len(state_manager.get_all())
-        
-        status_icon = "🟢" if not sys_metrics['safe_mode'] else "🟡"
-        status_text = "HEALTHY" if not sys_metrics['safe_mode'] else "DEGRADED"
-        
-        text = (
-            f"**SYSTEM DIAGNOSTICS**\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"{status_icon} **System Status:** `{status_text}`\n"
-            f"⚡ **Latency:** `{latency_ms:.0f} ms`\n"
-            f"🖥 **CPU Usage:** `{sys_metrics['cpu']}%`\n"
-            f"🧠 **RAM Usage:** `{sys_metrics['ram']}%`\n"
-            f"👁 **Active Watches:** `{watches}`\n"
-            f"🛡 **Safe Mode:** `{'ACTIVE' if sys_metrics['safe_mode'] else 'INACTIVE'}`\n"
-            f"📊 **Market Regime:** `NORMAL`"
-        )
-        
-        await msg.edit_text(text, parse_mode='Markdown')
+        await self._render_diagnostics(update.message, latency_override=latency, is_new=True)
 
     # --- Interaction Router ---
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        # Don't answer immediately if we are going to edit the message to avoid visual glitch
-        # but ensure we answer at the end or if error.
         
         data = query.data.split(":")
         action = data[0]
@@ -93,9 +72,9 @@ class SignalBot:
                 await self._handle_dashboard_refresh(query)
 
             elif action == "ping_action":
-                await query.answer()
-                # Simulate a ping command triggered via button
-                await self.cmd_ping(update, context)
+                await query.answer() # Ack the click
+                # Trigger internal diagnostics edit
+                await self._render_diagnostics(query.message, is_new=False)
 
             # Settings Navigation
             elif action == "settings_home":
@@ -126,7 +105,6 @@ class SignalBot:
                 await query.answer()
                 await self._render_watchlist(query.message)
             elif action == "watchlist_refresh":
-                # Watchlist specific refresh
                 await self._handle_refresh_watchlist(query)
             elif action == "watch":
                 await query.answer()
@@ -169,19 +147,14 @@ class SignalBot:
         """
         Renders the main trading dashboard.
         """
-        # Gather Metrics
         watchlist_count = len(state_manager.get_all())
         sys_metrics = SystemHealth.get_metrics()
         
-        # Safe Mode Indicator
         safe_status = "ON" if sys_metrics['safe_mode'] else "OFF"
         status_emoji = "🟡" if sys_metrics['safe_mode'] else "🟢"
         
-        # Latency Simulation (since we are rendering, we can't measure RTT easily without a ping)
-        # We display the poll interval as 'Heartbeat'
         heartbeat = f"{settings.POLL_INTERVAL}s"
-        
-        timestamp = datetime.utcnow().strftime("%H:%M UTC")
+        timestamp = get_current_time_str("%H:%M IST")
 
         text = (
             f"📡 **DEXSCREENER TERMINAL**\n"
@@ -216,27 +189,62 @@ class SignalBot:
         else:
             await message.edit_text(text, reply_markup=markup, parse_mode='Markdown')
 
+    async def _render_diagnostics(self, message, latency_override=None, is_new=False):
+        """
+        Renders the System Diagnostics Panel (Ping Result).
+        """
+        # Calculate execution latency if not provided
+        start_time = time.time()
+        sys_metrics = SystemHealth.get_metrics()
+        end_time = time.time()
+        
+        if latency_override:
+            latency_ms = latency_override
+        else:
+            latency_ms = (end_time - start_time) * 1000
+
+        watches = len(state_manager.get_all())
+        status_icon = "🟢" if not sys_metrics['safe_mode'] else "🟡"
+        status_text = "HEALTHY" if not sys_metrics['safe_mode'] else "DEGRADED"
+        
+        text = (
+            f"🏓 **PONG**\n"
+            f"────────────────\n"
+            f"{status_icon} **System Status:** `{status_text}`\n"
+            f"⚡ **Latency:** `{latency_ms:.0f} ms`\n"
+            f"🖥 **CPU Usage:** `{sys_metrics['cpu']}%`\n"
+            f"🧠 **RAM Usage:** `{sys_metrics['ram']}%`\n"
+            f"👁 **Active Watches:** `{watches}`\n"
+            f"🛡 **Safe Mode:** `{'ACTIVE' if sys_metrics['safe_mode'] else 'INACTIVE'}`\n"
+            f"📊 **Market Regime:** `NORMAL`\n"
+            f"🕒 **Time:** `{get_current_time_str()}`"
+        )
+        
+        # Add a back button so user isn't stuck
+        keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
+        
+        if is_new:
+            await message.reply_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await message.edit_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+
     async def _handle_dashboard_refresh(self, query):
         """
         In-place refresh of the dashboard metrics.
         """
-        # Visual feedback via Toast
         await query.answer("Syncing System Metrics...")
         
         try:
-            # 1. Trigger API Check (Lightweight) to ensure connectivity
-            # We don't need the result, just checking if it throws
             start = time.time()
+            # Lightweight connectivity check
             await self.api.get_pairs_by_chain(settings.TARGET_CHAIN)
             latency = (time.time() - start) * 1000
             
-            # 2. Re-render dashboard with updated timestamp and metrics
-            # We construct the text manually here to include the specific latency we just measured
             watchlist_count = len(state_manager.get_all())
             sys_metrics = SystemHealth.get_metrics()
             safe_status = "ON" if sys_metrics['safe_mode'] else "OFF"
             status_emoji = "🟡" if sys_metrics['safe_mode'] else "🟢"
-            timestamp = datetime.utcnow().strftime("%H:%M UTC")
+            timestamp = get_current_time_str("%H:%M IST")
 
             text = (
                 f"📡 **DEXSCREENER TERMINAL**\n"
@@ -265,9 +273,9 @@ class SignalBot:
             "Select a module to configure:"
         )
         keyboard = [
-            [InlineKeyboardButton("🔍 Filters (Liquidity, Age)", callback_data="settings_cat:filters")],
-            [InlineKeyboardButton("⚖ Scoring Weights", callback_data="settings_cat:weights")],
-            [InlineKeyboardButton("🛡 Risk Thresholds", callback_data="settings_cat:thresholds")],
+            [InlineKeyboardButton("🔍 Filters", callback_data="settings_cat:filters")],
+            [InlineKeyboardButton("⚖ Scoring", callback_data="settings_cat:weights")],
+            [InlineKeyboardButton("🛡 Thresholds", callback_data="settings_cat:thresholds")],
             [InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]
         ]
         await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
@@ -336,11 +344,8 @@ class SignalBot:
              return
 
         try:
-            # Simulate refresh cycle
             addresses = list(watchlist.keys())
             await self.api.get_pairs_bulk(addresses)
-            # In a real scenario, this updates shared state or returns data to render
-            
             await self._render_watchlist(query.message)
 
         except Exception as e:
@@ -356,95 +361,4 @@ class SignalBot:
                 price = float(pairs[0].get('priceUsd', 0))
                 symbol = pairs[0]['baseToken']['symbol']
                 
-                metadata = {
-                    "entry_price": price,
-                    "symbol": symbol,
-                    "chat_id": query.message.chat_id,
-                    "added_at": datetime.utcnow().timestamp()
-                }
-                await state_manager.add_token(address, metadata)
-                
-                keyboard = [
-                    [InlineKeyboardButton("✔ Monitoring", callback_data="noop")],
-                    [InlineKeyboardButton("↗ Chart", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{address}")]
-                ]
-                
-                await query.edit_message_caption(
-                    caption=query.message.caption + f"\n\n✅ **ADDED TO WATCHLIST**",
-                    reply_markup=InlineKeyboardMarkup(keyboard),
-                    parse_mode='Markdown'
-                )
-        except Exception as e:
-            log.error(f"Watch add failed: {e}")
-            await query.answer("Error adding token")
-
-    async def _render_help(self, message):
-        text = (
-            "❓ **SYSTEM GUIDE**\n"
-            "────────────────\n"
-            "**Control Panel**\n"
-            "• **Watchlist**: Track saved tokens.\n"
-            "• **Refresh**: Force system metric sync.\n"
-            "• **Settings**: Configure algorithm.\n"
-            "• **Ping**: detailed system health.\n\n"
-            "**Automated Signals**\n"
-            "Bot scans for new tokens meeting 'Filters'.\n"
-            "Signals are sent to the channel."
-        )
-        keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
-        await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-
-    async def broadcast_signal(self, analysis: dict):
-        msg = (
-            f"💎 **GEM DETECTED** | {analysis['baseToken']['symbol']}\n"
-            f"────────────────\n"
-            f"💰 Price: ${analysis.get('priceUsd', '0')}\n"
-            f"💧 Liquidity: ${analysis.get('liquidity', 0):,.0f}\n"
-            f"📊 Score: {analysis['risk']['score']}/100\n"
-            f"🐋 Whale: {'YES' if analysis['whale']['detected'] else 'NO'}\n"
-            f"────────────────\n"
-            f"`{analysis['address']}`"
-        )
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("👁 Watch", callback_data=f"watch:{analysis['address']}"),
-                InlineKeyboardButton("↗ DexScreener", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{analysis['address']}")
-            ]
-        ]
-
-        try:
-            await self.app.bot.send_message(
-                chat_id=settings.CHANNEL_ID,
-                text=msg,
-                parse_mode='Markdown',
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        except Exception as e:
-            log.error(f"Broadcast failed: {e}")
-
-    async def send_exit_alert(self, address: str, pnl: float, reason: str):
-        data = state_manager.get_all().get(address)
-        if not data: return
-        
-        symbol = data.get('symbol', 'UNK')
-        icon = "🚀" if pnl > 0 else "🛑"
-        
-        msg = (
-            f"🔔 **EXIT SIGNAL** {icon}\n"
-            f"────────────────\n"
-            f"Asset: **{symbol}**\n"
-            f"Reason: {reason}\n"
-            f"PnL: **{pnl:+.2f}%**"
-        )
-        try:
-            await self.app.bot.send_message(chat_id=data['chat_id'], text=msg, parse_mode='Markdown')
-        except Exception as e:
-            log.error(f"Exit alert failed: {e}")
-
-    async def shutdown(self):
-        if self.app.updater.running:
-            await self.app.updater.stop()
-        if self.app.running:
-            await self.app.stop()
-        await self.app.shutdown()
+                metadata 
