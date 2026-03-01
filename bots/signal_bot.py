@@ -29,7 +29,7 @@ def admin_restricted(func):
             log.warning(f"⛔ Unauthorized access attempt by User ID: {user.id} ({user.username}) at {timestamp}")
             
             # Reject request
-            rejection_text = "🚫 **ACCESS DENIED**\nThis is a private bot restricted to authorized administrators."
+            rejection_text = "🚫 **ACCESS DENIED**\nThis is a Private Project built for Personal use."
             
             if update.callback_query:
                 await update.callback_query.answer("🚫 Access Denied", show_alert=True)
