@@ -1,4 +1,4 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes
 from config.settings import settings
 from utils.logger import logger
@@ -7,39 +7,71 @@ class AlertBot:
     def __init__(self):
         self.app = Application.builder().token(settings.ALERT_BOT_TOKEN).build()
         self.chat_id = settings.ALERT_CHAT_ID
-        self.app.add_handler(CommandHandler("start", self.start_cmd))
-        # For alert bot we also add /ping for sysadmins convenience
-        self.app.add_handler(CommandHandler("ping", self.ping))
+        
+        # Add start command handler
+        self.app.add_handler(CommandHandler("start", self.start))
+        self.app.add_handler(CommandHandler("status", self.status))
 
-    async def start_cmd(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        welcome = (
-            "🚨 *Alert Bot* 🚨\n\n"
-            "This bot sends system and escalation alerts.\n"
-            "Use /ping to check current system health from alert bot."
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Welcome message for Alert Bot"""
+        welcome_text = (
+            "🚨 **System Alert Bot Activated**\n\n"
+            "This bot sends critical system notifications:\n"
+            "• Safe Mode activations\n"
+            "• API failures\n"
+            "• System resource alerts\n"
+            "• Escalation warnings\n\n"
+            "⚠️ *Keep this bot unmuted for critical alerts.*"
         )
+        
         keyboard = [
             [
-                InlineKeyboardButton("🏓 Ping", callback_data="alert_ping"),
+                InlineKeyboardButton("🔍 Check System Status", callback_data="sys_status"),
+                InlineKeyboardButton("📋 View Recent Alerts", callback_data="recent_alerts")
             ]
         ]
-        await update.message.reply_text(welcome, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(welcome_text, reply_markup=reply_markup, parse_mode="Markdown")
 
-    async def ping(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # For simplicity we reply with a minimal message. The main /ping is in signal bot.
-        await update.message.reply_text("🏓 Alert Bot is running.", parse_mode="Markdown")
+    async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Quick status check for alert bot"""
+        await update.message.reply_text(
+            "✅ **Alert Bot is operational**\n"
+            f"Monitoring chat: {self.chat_id}\n"
+            "Ready to send critical alerts.",
+            parse_mode="Markdown"
+        )
 
     async def send_alert(self, message: str):
+        """Send system alert to admin"""
         try:
-            await self.app.bot.send_message(chat_id=self.chat_id, text=f"🚨 **SYSTEM ALERT** 🚨\n\n{message}", parse_mode="Markdown")
+            full_message = (
+                f"🚨 **SYSTEM ALERT** 🚨\n\n"
+                f"{message}\n\n"
+                f"_Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_"
+            )
+            await self.app.bot.send_message(
+                chat_id=self.chat_id, 
+                text=full_message, 
+                parse_mode="Markdown"
+            )
+            logger.info(f"Alert sent: {message[:50]}...")
         except Exception as e:
             logger.error(f"Failed to send alert telegram: {e}")
 
-    async def start(self):
+    async def start_bot(self):
+        """Start the alert bot"""
         await self.app.initialize()
         await self.app.start()
+        self.app.updater.start_polling(drop_pending_updates=True)
+        logger.info("Alert Bot started")
 
-    async def stop(self):
+    async def stop_bot(self):
+        """Stop the alert bot"""
+        self.app.updater.stop()
         await self.app.stop()
         await self.app.shutdown()
+        logger.info("Alert Bot stopped")
 
 alert_bot = AlertBot()
