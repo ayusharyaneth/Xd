@@ -54,7 +54,7 @@ pip install -r requirements.txt
 
 ---
 
-## 🔐 Environment Configuration
+### 5. Environment Configuration
 
 Copy the example environment file:
 
@@ -72,7 +72,7 @@ If a value exists in both `.env` and `strategy.yaml`, `.env` takes priority.
 
 ---
 
-## 🧠 Strategy Configuration
+### 6. Strategy Configuration
 
 Edit:
 
@@ -84,7 +84,7 @@ Modify thresholds, filters, or risk parameters according to your trading logic.
 
 ---
 
-## ▶️ Running Dexy
+### 7. Running Dexy
 
 ```bash
 python3 main.py
@@ -98,7 +98,7 @@ Dexy will:
 
 ---
 
-## 🔄 Updating
+### 🔄 Updating
 
 ```bash
 git pull origin main
