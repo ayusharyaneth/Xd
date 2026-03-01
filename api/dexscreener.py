@@ -1,58 +1,75 @@
 import aiohttp
 import asyncio
-from loguru import logger
+from fake_useragent import UserAgent
+from tenacity import retry, stop_after_attempt, wait_exponential
 from config.settings import settings
+from utils.logger import log
 
-class DexScreenerClient:
+class DexScreenerAPI:
     def __init__(self):
         self.base_url = "https://api.dexscreener.com/latest/dex"
+        self.ua = UserAgent()
         self.session = None
 
     async def start(self):
-        self.session = aiohttp.ClientSession()
+        # Optimized TCPConnector for high concurrency
+        connector = aiohttp.TCPConnector(limit=100, ttl_dns_cache=300)
+        self.session = aiohttp.ClientSession(connector=connector)
 
     async def close(self):
         if self.session:
             await self.session.close()
 
-    async def get_token_pairs(self, chain: str, token_address: str):
-        url = f"{self.base_url}/tokens/{token_address}"
-        return await self._fetch(url)
+    def _get_headers(self):
+        return {
+            "User-Agent": self.ua.random,
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip, deflate"
+        }
 
-    async def get_latest_pairs(self):
-        # Note: DexScreener doesn't have a pure "newest" endpoint public in all docs,
-        # using a specific chain endpoint or search is common. 
-        # For this implementation, we simulate fetching by contract or use a known search logic.
-        # Assuming we are monitoring specific addresses or a feed in a real scenario.
-        # Here we implement the generic fetch structure.
-        pass
-
-    async def get_pairs_by_chain(self, chain_id: str):
-        # Implementation for specific chain polling
-        pass
-    
-    async def get_multiple_tokens(self, addresses: list):
-        if not addresses: return []
-        results = []
-        # Dexscreener allows comma separated, but limited length. Batching needed.
-        chunk_size = 30
-        for i in range(0, len(addresses), chunk_size):
-            chunk = addresses[i:i + chunk_size]
-            url = f"{self.base_url}/tokens/{','.join(chunk)}"
-            data = await self._fetch(url)
-            if data and 'pairs' in data:
-                results.extend(data['pairs'])
-        return results
-
-    async def _fetch(self, url):
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    async def get_pairs_by_chain(self, chain: str):
+        # NOTE: DexScreener requires specific pair addresses or search queries usually.
+        # The endpoint /tokens/{address} is for specific tokens.
+        # To monitor "new" tokens, we search by chain ID if supported or use /search
+        # For this implementation, we use a search query simulation for 'new' or specific known pairs logic.
+        # Since 'latest' isn't a simple public endpoint, we use the search endpoint sorted by age if available,
+        # or we assume we are given a list of pairs.
+        
+        # PRODUCTION STRATEGY: 
+        # Since we can't scrape 'New Pairs' directly without paid API or specific scraping logic,
+        # We will use the search endpoint for the specific chain to get active pairs.
+        url = f"{self.base_url}/search/?q={chain}" 
+        
         if not self.session: await self.start()
-        try:
-            async with self.session.get(url, timeout=10) as response:
-                if response.status == 200:
-                    return await response.json()
-                else:
-                    logger.error(f"API Error {response.status}: {url}")
-                    return None
-        except Exception as e:
-            logger.error(f"Request failed: {e}")
-            return None
+        
+        async with self.session.get(url, headers=self._get_headers(), timeout=10) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                return data.get('pairs', [])
+            elif resp.status == 429:
+                log.warning("Rate limited by DexScreener")
+                raise Exception("RateLimit")
+            else:
+                log.error(f"API Error: {resp.status}")
+                return []
+
+    async def get_pairs_bulk(self, addresses: list):
+        if not addresses: return []
+        # Chunking to avoid URL length limits (30 addresses max per call)
+        chunks = [addresses[i:i + 30] for i in range(0, len(addresses), 30)]
+        results = []
+        
+        if not self.session: await self.start()
+
+        for chunk in chunks:
+            url = f"{self.base_url}/tokens/{','.join(chunk)}"
+            try:
+                async with self.session.get(url, headers=self._get_headers(), timeout=10) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        results.extend(data.get('pairs', []))
+            except Exception as e:
+                log.error(f"Failed to fetch chunk: {e}")
+                
+        return results
