@@ -1,0 +1,19 @@
+risk:
+  max_fdv: 10000000
+  min_liquidity: 5000
+whale:
+  min_trade_usd: 10000
+early_buyer:
+  track_count: 50
+  profit_threshold: 3.0
+cluster:
+  similarity_threshold: 0.85
+regime:
+  volatility_window: 3600
+  high_vol_multiplier: 1.5
+self_defense:
+  max_error_rate: 0.2
+  max_latency_ms: 2000
+  max_memory_percent: 85.0
+exit:
+  liquidity_drop_percent: 30
