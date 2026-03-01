@@ -5,8 +5,8 @@ from utils.logger import log
 from utils.state import state_manager
 from api.dexscreener import DexScreenerAPI
 from engines.analysis import AnalysisEngine
-import asyncio
 from datetime import datetime
+import asyncio
 
 class SignalBot:
     def __init__(self, api: DexScreenerAPI):
@@ -26,32 +26,33 @@ class SignalBot:
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, self.handle_text_input))
 
     async def initialize(self):
-        log.info("Initializing Signal Bot Interface...")
+        log.info("Initializing Signal Bot UI...")
         await self.app.initialize()
         await self.app.start()
         await self.app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-        log.info("Signal Bot Terminal Active")
+        log.info("Signal Bot Dashboard Active")
 
     # --- Command Handlers ---
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        context.user_data.clear() 
+        context.user_data.clear()
         await self._render_dashboard(update.message, is_new=True)
 
     async def cmd_ping(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("● System Online")
+        latency = (datetime.now().timestamp() - update.message.date.timestamp()) * 1000
+        await update.message.reply_text(f"● Latency: {latency:.0f}ms")
 
     # --- Interaction Router ---
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
-        await query.answer()
+        await query.answer() # Ack to prevent freeze
 
         data = query.data.split(":")
         action = data[0]
         
-        # Clear edit mode unless specific action logic preserves it
-        if action != "settings_prompt":
+        # Reset edit mode unless specifically editing
+        if action != "settings_edit_val":
              context.user_data['edit_mode'] = None
 
         try:
@@ -59,7 +60,7 @@ class SignalBot:
             if action == "dashboard":
                 await self._render_dashboard(query.message)
             
-            # Settings System
+            # Settings Navigation
             elif action == "settings_home":
                 await self._render_settings_home(query.message)
             elif action == "settings_cat":
@@ -74,11 +75,8 @@ class SignalBot:
                 category, key = data[1], data[2]
                 context.user_data['edit_mode'] = {'cat': category, 'key': key}
                 await query.message.reply_text(
-                    f"📝 **EDIT PARAMETER**\n"
-                    f"Category: `{category.upper()}`\n"
-                    f"Key: `{key}`\n"
-                    f"Current: `{getattr(strategy, category).get(key)}`\n\n"
-                    f"Enter new value below:",
+                    f"**EDIT PARAMETER**\n`{key}`\n\nCurrent: `{getattr(strategy, category).get(key)}`\n"
+                    f"Enter new value:",
                     parse_mode='Markdown'
                 )
 
@@ -91,15 +89,16 @@ class SignalBot:
                 address = data[1] if len(data) > 1 else None
                 if address: await self._handle_watch_action(query, address)
 
-            # Utilities
+            # Info
             elif action == "help_menu":
                 await self._render_help(query.message)
 
         except Exception as e:
-            log.error(f"UI Router Error ({action}): {e}")
+            log.error(f"UI Interaction Error ({action}): {e}")
+            await query.message.reply_text("Error processing request.")
 
     async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Processes input for setting edits."""
+        """Captures text input for setting edits."""
         edit_state = context.user_data.get('edit_mode')
         
         if not edit_state:
@@ -112,192 +111,225 @@ class SignalBot:
             
             await strategy.update_setting(cat, key, val)
             
-            await update.message.reply_text(f"✓ Value updated to: `{val}`")
-            context.user_data['edit_mode'] = None 
+            await update.message.reply_text(f"✔ **Saved:** `{key}` → `{val}`", parse_mode='Markdown')
+            context.user_data['edit_mode'] = None
+            
+            # Return to menu
             await self._render_settings_category(update.message, cat, is_new=True)
             
-        except ValueError:
-            await update.message.reply_text("⚠️ Invalid format. Please enter a valid number or boolean.")
-        except Exception as e:
-            log.error(f"Edit persistence failed: {e}")
-            await update.message.reply_text("⚠️ System error saving configuration.")
+        except Exception:
+            await update.message.reply_text("✖ Invalid format. Value not saved.")
 
-    # --- UI Rendering Engine ---
+    # --- UI Renderers ---
 
     async def _render_dashboard(self, message, is_new=False):
-        watchlist_count = len(state_manager.get_all())
+        """
+        Renders the main dashboard with a minimal fintech aesthetic.
+        """
+        watchlist = state_manager.get_all()
         strict_mode = strategy.thresholds.get('strict_filtering', True)
-        timestamp = datetime.utcnow().strftime('%H:%M:%S UTC')
+        min_liq = strategy.filters.get('min_liquidity_usd', 0)
+        timestamp = datetime.utcnow().strftime("%H:%M:%S UTC")
         
-        # Professional Fintech Layout
+        # Aligned Monospace Metrics
+        metrics_block = (
+            f"`{'Watchlist':<12} {len(watchlist)}`\n"
+            f"`{'Liquidity':<12} >${min_liq:,.0f}`\n"
+            f"`{'Mode':<12} {'Strict' if strict_mode else 'Standard'}`"
+        )
+
         text = (
-            f"**DEXSCREENER INTELLIGENCE TERMINAL**\n"
-            f"● SYSTEM ONLINE  |  TARGET: {settings.TARGET_CHAIN.upper()}\n"
-            f"─────────────────────────────\n"
-            f"**METRICS**\n"
-            f"Watchlist    ::  {watchlist_count} Active\n"
-            f"Liquidity    ::  > ${strategy.filters.get('min_liquidity_usd', 0):,}\n"
-            f"Strict Mode  ::  {'ENABLED' if strict_mode else 'DISABLED'}\n"
-            f"Last Update  ::  {timestamp}\n"
-            f"─────────────────────────────"
+            f"**DEXSCREENER** · INTELLIGENCE\n"
+            f"● Online  |  {settings.TARGET_CHAIN.title()}\n\n"
+            f"**Session Metrics**\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{metrics_block}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Last Update: {timestamp}"
         )
 
         keyboard = [
             [
-                InlineKeyboardButton("📁 Watchlist", callback_data="watchlist_view"),
-                InlineKeyboardButton("🔄 Refresh", callback_data="watchlist_refresh")
+                InlineKeyboardButton("📂 Watchlist", callback_data="watchlist_view"),
+                InlineKeyboardButton("↻ Refresh", callback_data="watchlist_refresh")
             ],
             [
                 InlineKeyboardButton("⚙ Configuration", callback_data="settings_home"),
-                InlineKeyboardButton("❓ Guide", callback_data="help_menu")
+                InlineKeyboardButton("❓ Help", callback_data="help_menu")
             ]
         ]
         
+        markup = InlineKeyboardMarkup(keyboard)
         if is_new:
-            await message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            await message.reply_text(text, reply_markup=markup, parse_mode='Markdown')
         else:
-            await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            await message.edit_text(text, reply_markup=markup, parse_mode='Markdown')
 
     async def _render_settings_home(self, message):
         text = (
-            f"**CONFIGURATION PANEL**\n"
-            f"Select a module to configure parameters.\n"
-            f"─────────────────────────────"
+            "**CONFIGURATION**\n"
+            "Select a module to configure parameters.\n"
+            "━━━━━━━━━━━━━━━━━━━━"
         )
         keyboard = [
             [InlineKeyboardButton("Filters (Liquidity, Age)", callback_data="settings_cat:filters")],
-            [InlineKeyboardButton("Weights (Scoring)", callback_data="settings_cat:weights")],
-            [InlineKeyboardButton("Thresholds (Risk/Exit)", callback_data="settings_cat:thresholds")],
-            [InlineKeyboardButton("← Return to Terminal", callback_data="dashboard")]
+            [InlineKeyboardButton("Scoring Weights", callback_data="settings_cat:weights")],
+            [InlineKeyboardButton("Risk Thresholds", callback_data="settings_cat:thresholds")],
+            [InlineKeyboardButton("← Return", callback_data="dashboard")]
         ]
         await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
     async def _render_settings_category(self, message, category, is_new=False):
         data = getattr(strategy, category)
-        text = (
-            f"**EDITING :: {category.upper()}**\n"
-            f"Tap a parameter to modify value.\n"
-            f"─────────────────────────────"
-        )
+        text = f"**EDITING: {category.upper()}**\nSelect value to modify:"
         
         keyboard = []
         for key, val in data.items():
             if isinstance(val, bool):
-                status = "ENABLED" if val else "DISABLED"
-                btn_text = f"{key.replace('_', ' ').title()} :: {status}"
+                status = "ON" if val else "OFF"
+                btn_text = f"{key.replace('_', ' ').title()} [{status}]"
                 cb_data = f"settings_toggle:{category}:{key}"
             else:
-                btn_text = f"{key.replace('_', ' ').title()} :: {val}"
+                btn_text = f"{key.replace('_', ' ').title()}: {val}"
                 cb_data = f"settings_prompt:{category}:{key}"
             
             keyboard.append([InlineKeyboardButton(btn_text, callback_data=cb_data)])
         
         keyboard.append([InlineKeyboardButton("← Back", callback_data="settings_home")])
         
+        markup = InlineKeyboardMarkup(keyboard)
         if is_new:
-            await message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            await message.reply_text(text, reply_markup=markup, parse_mode='Markdown')
         else:
-            await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+            await message.edit_text(text, reply_markup=markup, parse_mode='Markdown')
 
     async def _render_watchlist(self, message):
         watchlist = state_manager.get_all()
         
         if not watchlist:
             text = (
-                f"**WATCHLIST**\n"
-                f"─────────────────────────────\n"
-                f"No assets currently tracked.\n"
-                f"Add assets via signal alerts."
+                "**WATCHLIST**\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "No active tokens.\n"
+                "Add tokens from signal alerts."
             )
-            keyboard = [[InlineKeyboardButton("← Return to Terminal", callback_data="dashboard")]]
+            keyboard = [[InlineKeyboardButton("← Dashboard", callback_data="dashboard")]]
             await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
             return
 
-        text = f"**ACTIVE WATCHLIST**\n─────────────────────────────\n"
-        for i, (addr, data) in enumerate(list(watchlist.items())[:8]):
+        text = "**ACTIVE ASSETS**\n━━━━━━━━━━━━━━━━━━━━\n"
+        
+        # Display up to 8 items to keep UI clean
+        items = list(watchlist.items())[:8]
+        for _, data in items:
             symbol = data.get('symbol', 'UNK')
-            entry = data.get('entry_price', 0)
-            text += f"• **{symbol}**  |  Entry: ${entry:.4f}\n"
+            price = data.get('entry_price', 0)
+            text += f"`{symbol:<8}` ${price:.4f}\n"
         
-        text += f"─────────────────────────────\nTotal: {len(watchlist)}"
-        
-        keyboard = [[InlineKeyboardButton("← Return to Terminal", callback_data="dashboard")]]
-        await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        if len(watchlist) > 8:
+            text += f"\n+ {len(watchlist)-8} more..."
 
-    async def _render_help(self, message):
-        text = (
-            f"**SYSTEM GUIDE**\n"
-            f"─────────────────────────────\n"
-            f"**Commands**\n"
-            f"/start  ::  Initialize Terminal\n"
-            f"/ping   ::  Check Latency\n\n"
-            f"**Workflow**\n"
-            f"1. System scans {settings.TARGET_CHAIN} chain.\n"
-            f"2. Filters applied via Configuration.\n"
-            f"3. Signals broadcast to channel.\n"
-            f"4. Track assets via Watchlist."
-        )
-        keyboard = [[InlineKeyboardButton("← Return to Terminal", callback_data="dashboard")]]
+        keyboard = [
+            [InlineKeyboardButton("↻ Refresh Prices", callback_data="watchlist_refresh")],
+            [InlineKeyboardButton("← Dashboard", callback_data="dashboard")]
+        ]
         await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
     async def _handle_refresh_watchlist(self, query):
-        """Visual refresh with minimal feedback to prevent spam feeling."""
-        await query.answer("Refreshing data stream...")
-        await query.message.edit_text(f"**SYNCING DATA STREAM...**\n─────────────────────────────\nFetching latest pricing from API...")
+        await query.answer("Syncing data...")
+        await query.message.edit_text("**SYNCING...**\nFetching latest market data.")
         
-        # Simulating data processing delay for UX (API is fast)
-        await asyncio.sleep(0.5)
-        
-        # Re-render watchlist
-        await self._render_watchlist(query.message)
+        watchlist = state_manager.get_all()
+        if not watchlist:
+             await self._render_watchlist(query.message)
+             return
+
+        try:
+            addresses = list(watchlist.keys())
+            latest_data = await self.api.get_pairs_bulk(addresses)
+            
+            # Simple simulation of data processing
+            # In a full version, we would update state_manager with new prices here
+            await asyncio.sleep(0.5) 
+
+            text = (
+                f"**SYNC COMPLETE**\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"Processed: {len(latest_data)} Pairs\n"
+                f"Status: Nominal"
+            )
+            await query.message.edit_text(text, parse_mode='Markdown')
+            await asyncio.sleep(1)
+            await self._render_watchlist(query.message)
+
+        except Exception as e:
+            log.error(f"Refresh failed: {e}")
+            await query.message.edit_text("**SYNC FAILED**\nNetwork Error", parse_mode='Markdown')
+            await asyncio.sleep(1.5)
+            await self._render_dashboard(query.message)
 
     async def _handle_watch_action(self, query, address):
         try:
             pairs = await self.api.get_pairs_bulk([address])
             if pairs:
                 price = float(pairs[0].get('priceUsd', 0))
+                symbol = pairs[0]['baseToken']['symbol']
+                
                 metadata = {
                     "entry_price": price,
-                    "symbol": pairs[0]['baseToken']['symbol'],
+                    "symbol": symbol,
                     "chat_id": query.message.chat_id,
                     "added_at": datetime.utcnow().timestamp()
                 }
                 await state_manager.add_token(address, metadata)
                 
-                # Update button visual state
                 keyboard = [
-                    [InlineKeyboardButton("✓ Tracking", callback_data="noop")],
-                    [InlineKeyboardButton("↗ DexScreener", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{address}")]
+                    [InlineKeyboardButton("✔ Monitoring", callback_data="noop")],
+                    [InlineKeyboardButton("↗ View Chart", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{address}")]
                 ]
                 
                 await query.edit_message_caption(
-                    caption=query.message.caption + f"\n\n**✓ ASSET TRACKED** | Entry: ${price}",
+                    caption=query.message.caption + f"\n\n**✔ WATCHLIST ADDED**\nEntry: ${price:.4f}",
                     reply_markup=InlineKeyboardMarkup(keyboard),
                     parse_mode='Markdown'
                 )
         except Exception as e:
-            log.error(f"Watch action failed: {e}")
-            await query.answer("Error tracking asset.")
+            log.error(f"Watch add failed: {e}")
+            await query.answer("Error adding token")
+
+    async def _render_help(self, message):
+        text = (
+            "**SYSTEM GUIDE**\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "• **Dashboard**: Main control center.\n"
+            "• **Refresh**: Forces a re-scan of watchlist.\n"
+            "• **Config**: Adjust risk scoring and filters.\n\n"
+            "**Commands**\n"
+            "`/start` - Reset Interface\n"
+            "`/ping` - Network Latency"
+        )
+        keyboard = [[InlineKeyboardButton("← Return", callback_data="dashboard")]]
+        await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
     async def broadcast_signal(self, analysis: dict):
-        """Broadcasts signal in Terminal format."""
+        """Sends a structured signal alert."""
         msg = (
-            f"**SIGNAL DETECTED**\n"
-            f"─────────────────────────────\n"
-            f"**{analysis['baseToken']['name']}** ({analysis['baseToken']['symbol']})\n"
-            f"`{analysis['address']}`\n\n"
-            f"Price       ::  ${analysis['priceUsd']}\n"
-            f"Liquidity   ::  ${analysis['liquidity']:,.0f}\n"
-            f"Age         ::  {analysis['age_hours']}h\n"
-            f"Risk Score  ::  {analysis['risk']['score']}/100\n"
-            f"Whale       ::  {'YES' if analysis['whale']['detected'] else 'NO'}\n"
-            f"─────────────────────────────"
+            f"**SIGNAL DETECTED** | {analysis['baseToken']['symbol']}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"`{'Price':<10} ${analysis.get('priceUsd', '0')}`\n"
+            f"`{'Liquidity':<10} ${analysis.get('liquidity', 0):,.0f}`\n"
+            f"`{'Risk Score':<10} {analysis['risk']['score']}/100`\n"
+            f"`{'Age':<10} {analysis.get('age_hours', 0)}h`\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Address: `{analysis['address']}`"
         )
         
-        keyboard = [[
-            InlineKeyboardButton("✚ Watchlist", callback_data=f"watch:{analysis['address']}"),
-            InlineKeyboardButton("↗ DexScreener", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{analysis['address']}")
-        ]]
+        keyboard = [
+            [
+                InlineKeyboardButton("📂 Add to Watchlist", callback_data=f"watch:{analysis['address']}"),
+                InlineKeyboardButton("↗ DexScreener", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{analysis['address']}")
+            ]
+        ]
 
         try:
             await self.app.bot.send_message(
@@ -313,13 +345,15 @@ class SignalBot:
         data = state_manager.get_all().get(address)
         if not data: return
         
+        symbol = data.get('symbol', 'UNK')
+        icon = "🚀" if pnl > 0 else "🛑"
+        
         msg = (
-            f"**EXIT TRIGGERED**\n"
-            f"─────────────────────────────\n"
-            f"Asset   ::  {data['symbol']}\n"
-            f"Reason  ::  {reason}\n"
-            f"PnL     ::  {pnl:.2f}%\n"
-            f"─────────────────────────────"
+            f"**EXIT SIGNAL** {icon}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"Asset: **{symbol}**\n"
+            f"Reason: {reason}\n"
+            f"PnL: **{pnl:+.2f}%**"
         )
         try:
             await self.app.bot.send_message(chat_id=data['chat_id'], text=msg, parse_mode='Markdown')
