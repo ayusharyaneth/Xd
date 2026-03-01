@@ -3,12 +3,46 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 from config.settings import settings, strategy
 from utils.logger import log
 from utils.state import state_manager
-from utils.helpers import get_ist_time_str, get_ist_datetime
+from utils.helpers import get_ist_time_str
 from api.dexscreener import DexScreenerAPI
 from system.health import SystemHealth
 from engines.analysis import AnalysisEngine
+from functools import wraps
 import asyncio
 import time
+
+def admin_restricted(func):
+    """
+    Decorator to restrict handler access to admin users only.
+    """
+    @wraps(func)
+    async def wrapper(self, update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+        user = update.effective_user
+        if not user:
+            return
+
+        admin_ids = settings.get_admins()
+        
+        if user.id not in admin_ids:
+            # Log unauthorized attempt
+            timestamp = get_ist_time_str()
+            log.warning(f"⛔ Unauthorized access attempt by User ID: {user.id} ({user.username}) at {timestamp}")
+            
+            # Reject request
+            rejection_text = "🚫 **ACCESS DENIED**\nThis is a private bot restricted to authorized administrators."
+            
+            if update.callback_query:
+                await update.callback_query.answer("🚫 Access Denied", show_alert=True)
+                # Optional: Edit message to show rejection if it persists
+            elif update.message:
+                await update.message.reply_text(rejection_text, parse_mode='Markdown')
+            
+            # Stop execution
+            return
+
+        # Proceed if authorized
+        return await func(self, update, context, *args, **kwargs)
+    return wrapper
 
 class SignalBot:
     def __init__(self, api: DexScreenerAPI):
@@ -36,25 +70,32 @@ class SignalBot:
 
     # --- Command Handlers ---
 
+    @admin_restricted
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         await self._render_dashboard(update.message, is_new=True)
 
+    @admin_restricted
     async def cmd_ping(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
         Handles /ping command (Sends new message).
         """
-        # Calculate latency from message timestamp to now
         msg_date = update.message.date
-        now = get_ist_datetime()
-        # Ensure msg_date is timezone aware for subtraction or convert both to timestamps
-        latency_ms = (now.timestamp() - msg_date.timestamp()) * 1000
+        # Ensure timezone compatibility for latency calc
+        # Using simple timestamp diff for robustness
+        now_ts = time.time()
+        msg_ts = msg_date.timestamp()
+        
+        latency_ms = (now_ts - msg_ts) * 1000
+        # Prevent negative latency if clocks skew slightly
+        latency_ms = max(0, latency_ms)
         
         text, reply_markup = self._generate_diagnostics_content(latency_ms)
         await update.message.reply_text(text, parse_mode='Markdown', reply_markup=reply_markup)
 
     # --- Interaction Router ---
 
+    @admin_restricted
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         
@@ -74,7 +115,6 @@ class SignalBot:
                 await self._handle_dashboard_refresh(query)
 
             elif action == "ping_action":
-                # Edit existing message to show diagnostics
                 await query.answer("Running Diagnostics...")
                 await self._render_diagnostics_panel(query.message)
 
@@ -125,6 +165,7 @@ class SignalBot:
             except:
                 pass
 
+    @admin_restricted
     async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         edit_state = context.user_data.get('edit_mode')
         if not edit_state: return 
@@ -174,15 +215,11 @@ class SignalBot:
         """
         Renders diagnostics by editing the message (Inline Button Action).
         """
-        # Measure calculation time as latency
         start = time.perf_counter()
-        # Fetching metrics is fast, but let's simulate a tiny check
+        # Simulate check
         sys_metrics = SystemHealth.get_metrics() 
         end = time.perf_counter()
-        latency_ms = (end - start) * 1000 * 100 # Multiply to make it visible or use real RTT if available
-        
-        # Better: Use the API response time from a quick check? 
-        # For UI responsiveness, we'll just use execution time.
+        latency_ms = (end - start) * 1000
         
         text, reply_markup = self._generate_diagnostics_content(latency_ms)
         await message.edit_text(text, parse_mode='Markdown', reply_markup=reply_markup)
@@ -234,7 +271,6 @@ class SignalBot:
         
         try:
             start = time.perf_counter()
-            # Lightweight connectivity check
             await self.api.get_pairs_by_chain(settings.TARGET_CHAIN)
             end = time.perf_counter()
             latency = (end - start) * 1000
