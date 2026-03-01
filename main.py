@@ -370,7 +370,7 @@ class DexIntelligenceSystem:
     
     async def _self_defense_loop(self):
         """Self-defense monitoring loop"""
-        interval = self.defense_config.monitoring.check_interval_seconds
+        interval = self.config.strategy.self_defense.monitoring.check_interval_seconds
         
         while self._running:
             try:
