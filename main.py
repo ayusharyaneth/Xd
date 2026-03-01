@@ -1,7 +1,7 @@
 import asyncio
 import signal
 from config.settings import settings, strategy
-from utils.logger import log
+from utils.logger import log, setup_logger
 from utils.state import state_manager
 from api.dexscreener import DexScreenerAPI
 from engines.analysis import AnalysisEngine
@@ -105,7 +105,12 @@ async def watch_task():
             await asyncio.sleep(10)
 
 async def main():
+    # 0. Configure Logging (Dependency Injection)
+    # This fixes the NameError by initializing the logger with settings explicitly
+    setup_logger(settings.LOG_LEVEL)
+    
     # 1. Initialize System
+    log.info("Initializing System Components...")
     await state_manager.load()
     await api.start()
     await alert_bot.initialize()
