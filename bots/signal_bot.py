@@ -13,8 +13,11 @@ class SignalBot:
         self._setup_handlers()
 
     def _setup_handlers(self):
+        # Command Handlers
         self.app.add_handler(CommandHandler("start", self.cmd_start))
         self.app.add_handler(CommandHandler("ping", self.cmd_ping))
+        
+        # Callback Handler (Pattern matches everything)
         self.app.add_handler(CallbackQueryHandler(self.handle_callback))
 
     async def initialize(self):
@@ -22,18 +25,23 @@ class SignalBot:
         Initializes the bot application and starts the polling mechanism 
         in a non-blocking background task.
         """
+        log.info("Initializing Signal Bot...")
         await self.app.initialize()
         await self.app.start()
-        # drop_pending_updates=True ensures the bot doesn't crash processing old/stale updates on startup
+        
+        # We start polling but we do NOT await the idle signal here, 
+        # as we want to return control to the main loop.
         await self.app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-        log.info("Signal Bot Polling Started")
+        log.info("Signal Bot Polling Active (Listening for /start)")
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
         Handles /start command. Displays welcome message and status button.
         """
+        log.info(f"Received /start command from {update.effective_user.id}")
+        
         keyboard = [
-            [InlineKeyboardButton("🟢 Online", callback_data="status_check")],
+            [InlineKeyboardButton("🟢 Check Status", callback_data="status_check")],
             [InlineKeyboardButton("ℹ️ Help", callback_data="help_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
@@ -61,12 +69,35 @@ class SignalBot:
         data = query.data.split(":")
         action = data[0]
         
+        log.debug(f"Callback received: {action}")
+        
         try:
             if action == "status_check":
+                loop_time = asyncio.get_running_loop().time()
                 await query.edit_message_text(
-                    text=f"✅ **System Normal**\nTime: {asyncio.get_running_loop().time():.2f}",
-                    parse_mode='Markdown'
+                    text=f"✅ **System Normal**\nLoop Time: {loop_time:.2f}\nBot is responsive.",
+                    parse_mode='Markdown',
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="start_menu")]])
                 )
+            
+            elif action == "start_menu":
+                 # Return to main menu
+                keyboard = [
+                    [InlineKeyboardButton("🟢 Check Status", callback_data="status_check")],
+                    [InlineKeyboardButton("ℹ️ Help", callback_data="help_menu")]
+                ]
+                await query.edit_message_text(
+                     text="🤖 **DexScreener Intelligence System**\n\nSystem is active.",
+                     reply_markup=InlineKeyboardMarkup(keyboard),
+                     parse_mode='Markdown'
+                )
+
+            elif action == "help_menu":
+                 await query.edit_message_text(
+                    text="ℹ️ **Help Menu**\n\n/start - Restart Bot\n/ping - Check Latency",
+                    parse_mode='Markdown',
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="start_menu")]])
+                 )
                 
             elif action == "watch":
                 address = data[1] if len(data) > 1 else None
@@ -74,7 +105,6 @@ class SignalBot:
                     await self._handle_watch_action(query, address)
                     
             elif action == "refresh":
-                # Placeholder for refresh logic - typically re-fetches token data
                 await query.edit_message_caption(
                     caption=query.message.caption + "\n\n🔄 *Data Refreshed*",
                     parse_mode='Markdown',
@@ -97,6 +127,7 @@ class SignalBot:
                 await state_manager.add_token(address, metadata)
                 
                 # Update the button to show it's being watched
+                # We reuse the link button but remove the watch button
                 keyboard = [
                     [InlineKeyboardButton("✅ Watching", callback_data="noop")],
                     [InlineKeyboardButton("📈 DexScreener", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{address}")]
@@ -118,6 +149,7 @@ class SignalBot:
             f"Address: `{analysis['address']}`\n\n"
             f"💰 Price: ${analysis['priceUsd']}\n"
             f"💧 Liquidity: ${analysis['liquidity']:,.0f}\n"
+            f"⏳ Age: {analysis['age_hours']}h\n"
             f"📊 Risk Score: {analysis['risk']['score']}/100\n"
             f"🐋 Whale: {'YES 🚨' if analysis['whale']['detected'] else 'No'}\n"
         )
