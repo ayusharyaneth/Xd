@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     ALERT_BOT_TOKEN: str
     ADMIN_CHAT_IDS: str
     CHANNEL_ID: int
+    LOG_CHANNEL_ID: int  # Dedicated channel for security logs
     LOG_LEVEL: str = "INFO"
     POLL_INTERVAL: int = 15
     TARGET_CHAIN: str = "solana"
@@ -82,18 +83,12 @@ class StrategyConfig:
                 print(f"Error saving strategy: {e}")
 
     async def update_setting(self, section: str, key: str, value: Any):
-        """
-        Updates a specific setting safely and persists it.
-        Example: section='filters', key='min_liquidity_usd', value=5000
-        """
         if section not in self._data:
             self._data[section] = {}
         
-        # Type enforcement based on existing value
         current_val = self._data[section].get(key)
         if current_val is not None:
             if isinstance(current_val, bool):
-                # Ensure boolean
                 value = str(value).lower() in ('true', '1', 'yes', 'on')
             elif isinstance(current_val, int):
                 value = int(value)
