@@ -1,5 +1,6 @@
 import asyncio
 import signal
+from datetime import datetime
 from config.settings import settings, strategy
 from utils.logger import log, setup_logger
 from utils.state import state_manager
@@ -46,14 +47,13 @@ async def pipeline_task():
                 addr = pair.get('pairAddress')
                 if not addr: continue
 
-                # Dedup check (Runtime)
                 if addr in processed_tokens:
                     continue
                 
                 # 3. Analyze & Filter
                 result = AnalysisEngine.analyze_token(pair)
                 
-                # Mark as processed to prevent re-calc
+                # Mark as processed
                 processed_tokens.add(addr) 
                 
                 if result:
@@ -68,10 +68,8 @@ async def pipeline_task():
             if new_signals_count > 0:
                 log.info(f"Processed batch. New Signals: {new_signals_count}")
 
-            # Cleanup processed cache (Rolling window)
             if len(processed_tokens) > 10000:
                 processed_tokens.clear()
-                log.info("Cleared processed tokens cache.")
             
             await asyncio.sleep(settings.POLL_INTERVAL)
 
@@ -108,7 +106,6 @@ async def watch_task():
 
                 pnl_pct = ((curr_price - entry_price) / entry_price) * 100
                 
-                # Exit Logic
                 tp = strategy.thresholds.get('take_profit_percent', 100)
                 sl = strategy.thresholds.get('stop_loss_percent', -25)
 
@@ -136,12 +133,12 @@ async def main():
     await state_manager.load()
     await api.start()
     
-    # Initialize Bots (Starts polling/webhooks)
+    # Initialize Bots
     await alert_bot.initialize()
     await signal_bot.initialize()
 
     # 2. Send Online Alert
-    timestamp = get_current_datetime_str() + " IST"
+    timestamp = get_current_datetime_str()
     try:
         await alert_bot.send_system_alert(
             f"🟢 **Bot Status: ONLINE**\n"
@@ -184,30 +181,24 @@ async def main():
         # 6. Graceful Shutdown Procedure
         log.info("Initiating Graceful Shutdown...")
 
-        # A. Send Offline Alert (while connection is still active)
-        timestamp = get_current_datetime_str() + " IST"
+        timestamp = get_current_datetime_str()
         try:
-            log.info("Sending offline alert...")
             await alert_bot.send_system_alert(
                 f"🔴 **Bot Status: OFFLINE**\n"
                 f"⚠ Disconnected from VPS\n"
                 f"🕒 `{timestamp}`"
             )
-            # Brief pause to ensure message delivery
             await asyncio.sleep(1)
         except Exception as e:
             log.error(f"Failed to send offline alert: {e}")
 
-        # B. Cancel Background Tasks
         log.info("Stopping background tasks...")
         for t in tasks: t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        # C. Close Network Sessions
         log.info("Closing API sessions...")
         await api.close()
 
-        # D. Stop Bots
         log.info("Stopping Telegram bots...")
         await signal_bot.shutdown()
         await alert_bot.shutdown()
