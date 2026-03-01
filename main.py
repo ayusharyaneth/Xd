@@ -20,20 +20,29 @@ async def pipeline_task():
     """
     Core Intelligence Loop: Fetches, Filters, Analyzes, Alerts.
     """
-    log.info("Starting Pipeline...")
+    log.info(f"Starting Pipeline Task (Chain: {settings.TARGET_CHAIN})...")
     while True:
         try:
-            # 1. Self Defense
+            # 1. Self Defense Check
             if SystemHealth.check():
                 await asyncio.sleep(10)
                 continue
 
-            # 2. Fetch Data (Search logic used for 'latest' simulation)
+            # 2. Fetch Data
+            # Note: Errors in API fetch are handled inside the API class, returns empty list on fail
             pairs = await api.get_pairs_by_chain(settings.TARGET_CHAIN)
+            
+            if not pairs:
+                log.debug("No pairs returned from API. Retrying shortly...")
+                await asyncio.sleep(settings.POLL_INTERVAL)
+                continue
+
+            new_signals_count = 0
             
             for pair in pairs:
                 addr = pair.get('pairAddress')
-                
+                if not addr: continue
+
                 # Dedup check
                 if addr in processed_tokens:
                     continue
@@ -44,44 +53,51 @@ async def pipeline_task():
                 if result:
                     # 4. Filter by Risk
                     if result['risk']['is_safe']:
-                        log.info(f"Signal found: {result['baseToken']['symbol']}")
+                        log.info(f"Signal found: {result['baseToken']['symbol']} ({addr})")
                         await signal_bot.broadcast_signal(result)
                         processed_tokens.add(addr)
+                        new_signals_count += 1
                     else:
-                        # Log risky tokens strictly for debug
-                        log.debug(f"Skipped Risky: {result['baseToken']['symbol']} - Score: {result['risk']['score']}")
+                        # Mark as processed so we don't re-analyze risky tokens repeatedly
+                        processed_tokens.add(addr) 
+            
+            if new_signals_count > 0:
+                log.info(f"Processed batch. New Signals: {new_signals_count}")
 
             # Cleanup processed cache to prevent memory leak
             if len(processed_tokens) > 10000:
                 processed_tokens.clear()
+                log.info("Cleared processed tokens cache.")
             
             await asyncio.sleep(settings.POLL_INTERVAL)
 
         except Exception as e:
             log.error(f"Pipeline Iteration Error: {e}")
-            await asyncio.sleep(5) # Backoff on error
+            await asyncio.sleep(5) 
 
 async def watch_task():
     """
     Monitors active watchlist for PnL/Exit signals.
     """
-    log.info("Starting Watch Monitor...")
+    log.info("Starting Watch Monitor Task...")
     while True:
         try:
             watchlist = state_manager.get_all()
             if not watchlist:
-                await asyncio.sleep(60)
+                await asyncio.sleep(30)
                 continue
 
             addresses = list(watchlist.keys())
-            # Batch fetch
+            # Batch fetch updates
             current_data = await api.get_pairs_bulk(addresses)
             
             for pair in current_data:
-                addr = pair['pairAddress']
+                addr = pair.get('pairAddress')
+                if not addr or addr not in watchlist: continue
+
                 entry = watchlist[addr]
                 curr_price = float(pair.get('priceUsd', 0))
-                entry_price = entry['entry_price']
+                entry_price = float(entry.get('entry_price', 0))
 
                 if entry_price == 0: continue
 
@@ -98,21 +114,22 @@ async def watch_task():
                     await signal_bot.send_exit_alert(addr, pnl_pct, "Stop Loss 🛑")
                     await state_manager.remove_token(addr)
 
-            await asyncio.sleep(60) # Check every minute
+            await asyncio.sleep(60)
             
         except Exception as e:
             log.error(f"Watch Task Error: {e}")
             await asyncio.sleep(10)
 
 async def main():
-    # 0. Configure Logging (Dependency Injection)
-    # This fixes the NameError by initializing the logger with settings explicitly
+    # 0. Configure Logging
     setup_logger(settings.LOG_LEVEL)
     
     # 1. Initialize System
     log.info("Initializing System Components...")
     await state_manager.load()
     await api.start()
+    
+    # Initialize Bots (Starts polling in background)
     await alert_bot.initialize()
     await signal_bot.initialize()
 
@@ -127,12 +144,14 @@ async def main():
         loop.add_signal_handler(sig, signal_handler)
 
     # 3. Launch Background Tasks via Supervisor
+    # We wrap them in TaskSupervisor to ensure they auto-restart on crash
     tasks = [
         asyncio.create_task(TaskSupervisor.create_task(pipeline_task(), "Pipeline")),
         asyncio.create_task(TaskSupervisor.create_task(watch_task(), "WatchMonitor"))
     ]
 
     await alert_bot.send_system_alert("System Online 🟢")
+    log.success("All systems operational. Waiting for signals...")
     
     # 4. Wait for shutdown
     await stop_event.wait()
