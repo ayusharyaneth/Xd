@@ -1,6 +1,6 @@
 from .risk import RiskEngine
 from .whale import WhaleEngine
-from config.settings import strategy
+from config.settings import strategy, settings
 from utils.logger import log
 import time
 
@@ -13,11 +13,25 @@ class AnalysisEngine:
         """
         token_symbol = pair_data.get('baseToken', {}).get('symbol', 'UNKNOWN')
         addr = pair_data.get('pairAddress', 'UNKNOWN')
+        
+        # --- 0. CHAIN VALIDATION ---
+        chain_id = pair_data.get('chainId', '').lower()
+        if chain_id != settings.TARGET_CHAIN.lower():
+            # Silent drop for wrong chain
+            return None
 
         # --- 1. DATA VALIDITY CHECK ---
         liq_raw = pair_data.get('liquidity', {}).get('usd', 0)
         if liq_raw is None: liq_raw = 0
         liq = float(liq_raw)
+
+        vol_h1_raw = pair_data.get('volume', {}).get('h1', 0)
+        if vol_h1_raw is None: vol_h1_raw = 0
+        vol_h1 = float(vol_h1_raw)
+        
+        fdv_raw = pair_data.get('fdv', 0)
+        if fdv_raw is None: fdv_raw = 0
+        fdv = float(fdv_raw)
 
         # --- 2. HARD FILTERS (The Gatekeeper) ---
         
@@ -27,7 +41,19 @@ class AnalysisEngine:
             log.debug(f"DROP [{token_symbol}]: Liq ${liq:.0f} < ${min_liq}")
             return None
 
-        # B. Age Filter
+        # B. Volume Filter (H1)
+        min_vol = strategy.filters.get('min_volume_h1', 0)
+        if vol_h1 < min_vol:
+            log.debug(f"DROP [{token_symbol}]: Vol H1 ${vol_h1:.0f} < ${min_vol}")
+            return None
+
+        # C. FDV/Market Cap Filter
+        max_fdv = strategy.filters.get('max_fdv', 0)
+        if max_fdv > 0 and fdv > max_fdv:
+             log.debug(f"DROP [{token_symbol}]: FDV ${fdv:.0f} > ${max_fdv}")
+             return None
+
+        # D. Age Filter
         # DexScreener often provides pairCreatedAt in milliseconds
         created_at_ms = pair_data.get('pairCreatedAt')
         age_hours = 0
@@ -63,16 +89,22 @@ class AnalysisEngine:
         
         buy_sell_ratio = buys / sells if sells > 0 else 100
         
+        # --- 5. Price Change Validity (Optional Sanity Check) ---
+        price_change_h1 = pair_data.get('priceChange', {}).get('h1', 0)
+        
         return {
             "address": addr,
             "baseToken": pair_data.get('baseToken'),
             "priceUsd": pair_data.get('priceUsd'),
             "liquidity": liq,
+            "fdv": fdv,
             "risk": risk,
             "whale": whale,
             "age_hours": round(age_hours, 2),
             "metrics": {
                 "buy_sell_ratio": round(buy_sell_ratio, 2),
-                "volume_h24": vol_h24
+                "volume_h1": vol_h1,
+                "volume_h24": vol_h24,
+                "price_change_h1": price_change_h1
             }
         }
