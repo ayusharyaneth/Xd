@@ -14,6 +14,9 @@ from system.health import SystemHealth
 api = DexScreenerAPI()
 alert_bot = AlertBot()
 signal_bot = SignalBot(api)
+
+# Using a set for processed tokens is good for runtime deduplication,
+# but ideally, this should persist or we should rely on strict age filtering.
 processed_tokens = set()
 
 async def pipeline_task():
@@ -21,6 +24,10 @@ async def pipeline_task():
     Core Intelligence Loop: Fetches, Filters, Analyzes, Alerts.
     """
     log.info(f"Starting Pipeline Task (Chain: {settings.TARGET_CHAIN})...")
+    
+    # Pre-load known tokens to prevent startup flooding if needed, 
+    # but strictly relies on Age Filter now.
+    
     while True:
         try:
             # 1. Self Defense Check
@@ -29,11 +36,13 @@ async def pipeline_task():
                 continue
 
             # 2. Fetch Data
-            # Note: Errors in API fetch are handled inside the API class, returns empty list on fail
+            # Note: The API likely uses a search query. 
+            # This returns 'relevant' tokens, which might be old.
+            # The AnalysisEngine MUST filter by Age.
             pairs = await api.get_pairs_by_chain(settings.TARGET_CHAIN)
             
             if not pairs:
-                log.debug("No pairs returned from API. Retrying shortly...")
+                log.debug("No pairs returned from API.")
                 await asyncio.sleep(settings.POLL_INTERVAL)
                 continue
 
@@ -43,28 +52,31 @@ async def pipeline_task():
                 addr = pair.get('pairAddress')
                 if not addr: continue
 
-                # Dedup check
+                # Dedup check (Runtime)
                 if addr in processed_tokens:
                     continue
                 
-                # 3. Analyze
+                # 3. Analyze & Filter
+                # This now includes the strict Age Check
                 result = AnalysisEngine.analyze_token(pair)
                 
+                # Mark as processed regardless of result to avoid re-calculating bad tokens
+                processed_tokens.add(addr) 
+                
                 if result:
-                    # 4. Filter by Risk
+                    # 4. Filter by Risk (Double check)
                     if result['risk']['is_safe']:
-                        log.info(f"Signal found: {result['baseToken']['symbol']} ({addr})")
+                        log.info(f"Signal found: {result['baseToken']['symbol']} ({addr}) - Age: {result['age_hours']}h")
                         await signal_bot.broadcast_signal(result)
-                        processed_tokens.add(addr)
                         new_signals_count += 1
                     else:
-                        # Mark as processed so we don't re-analyze risky tokens repeatedly
-                        processed_tokens.add(addr) 
+                        log.debug(f"Filtered Risky/Old: {result['baseToken']['symbol']}")
             
             if new_signals_count > 0:
                 log.info(f"Processed batch. New Signals: {new_signals_count}")
 
             # Cleanup processed cache to prevent memory leak
+            # We keep it large enough to cover the API's return window
             if len(processed_tokens) > 10000:
                 processed_tokens.clear()
                 log.info("Cleared processed tokens cache.")
@@ -129,7 +141,7 @@ async def main():
     await state_manager.load()
     await api.start()
     
-    # Initialize Bots (Starts polling in background)
+    # Initialize Bots (This starts the internal polling tasks)
     await alert_bot.initialize()
     await signal_bot.initialize()
 
@@ -144,7 +156,6 @@ async def main():
         loop.add_signal_handler(sig, signal_handler)
 
     # 3. Launch Background Tasks via Supervisor
-    # We wrap them in TaskSupervisor to ensure they auto-restart on crash
     tasks = [
         asyncio.create_task(TaskSupervisor.create_task(pipeline_task(), "Pipeline")),
         asyncio.create_task(TaskSupervisor.create_task(watch_task(), "WatchMonitor"))
