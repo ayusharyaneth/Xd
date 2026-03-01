@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     MAX_LATENCY_MS: float = Field(yaml_config.get('self_defense', {}).get('max_latency_ms', 2000))
     MAX_MEMORY_PERCENT: float = Field(yaml_config.get('self_defense', {}).get('max_memory_percent', 85.0))
 
+    # New operational settings
+    ALERT_COOLDOWN_SECONDS: int = Field(yaml_config.get('alert', {}).get('alert_cooldown_seconds', 600))
+    WATCH_EXPIRY_SECONDS: int = Field(yaml_config.get('watch', {}).get('watch_expiry_seconds', 86400))
+
     class Config:
         env_file = ".env"
         extra = "ignore"
