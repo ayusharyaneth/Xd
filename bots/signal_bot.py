@@ -108,8 +108,20 @@ class SignalBot:
 
     # --- Interaction Router ---
 
-    @admin_restricted
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        # We handle 'signal_refresh' WITHOUT admin restriction to allow public channel interaction if desired.
+        # However, for consistency with project rules, we apply admin restriction unless it's a public button.
+        # But per requirements "Only specific Telegram user IDs... are allowed to... Trigger refresh",
+        # we must wrap this logic.
+        
+        # For now, we apply admin restriction to ALL actions as requested, 
+        # but in a real signal bot, 'Refresh' might be public. 
+        # Following strict requirement: "Only specific Telegram user IDs... are allowed".
+        
+        await self._restricted_callback_logic(update, context)
+
+    @admin_restricted
+    async def _restricted_callback_logic(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         
         data = query.data.split(":")
@@ -119,8 +131,13 @@ class SignalBot:
              context.user_data['edit_mode'] = None
 
         try:
+            # Signal Refresh Logic (Per Token)
+            if action == "signal_refresh":
+                address = data[1] if len(data) > 1 else None
+                if address: await self._handle_signal_refresh(query, address)
+
             # Dashboard Actions
-            if action == "dashboard":
+            elif action == "dashboard":
                 await query.answer()
                 await self._render_dashboard(query.message)
             
@@ -291,7 +308,7 @@ class SignalBot:
             timestamp = get_ist_time_str("%H:%M IST")
 
             text = (
-                f"📡 **TERMINAL**\n"
+                f"📡 **DEXSCREENER TERMINAL**\n"
                 f"────────────────\n\n"
                 f"{status_emoji} **Status:** `Online`\n"
                 f"⚡ **Latency:** `{latency:.0f} ms`\n"
@@ -427,6 +444,76 @@ class SignalBot:
             log.error(f"Watch add failed: {e}")
             await query.answer("Error adding token")
 
+    async def _handle_signal_refresh(self, query, address):
+        """
+        Refreshes a specific signal message in place without spamming new messages.
+        """
+        await query.answer("Refreshing Signal Data...")
+        
+        try:
+            # 1. Fetch latest data for this specific token
+            pairs = await self.api.get_pairs_bulk([address])
+            
+            if not pairs:
+                await query.answer("Token data unavailable", show_alert=True)
+                return
+
+            pair = pairs[0]
+            
+            # 2. Re-Analyze
+            analysis = AnalysisEngine.analyze_token(pair)
+            
+            if not analysis:
+                await query.answer("Token no longer meets criteria", show_alert=True)
+                return
+
+            # 3. Re-Render Message
+            # We preserve original detection time if stored, otherwise we use current time
+            # Ideally detection time should be passed in callback_data, but for simplicity we show current state
+            
+            metrics = analysis.get('metrics', {})
+            vol_h1 = metrics.get('volume_h1', 0)
+            p_change = metrics.get('price_change_h1', 0)
+            
+            liq_fmt = f"${analysis.get('liquidity', 0):,.0f}"
+            fdv_fmt = f"${analysis.get('fdv', 0):,.0f}"
+            vol_fmt = f"${vol_h1:,.0f}"
+            age_fmt = f"{analysis.get('age_hours', 0)}h"
+            trend = "📈" if p_change >= 0 else "📉"
+            refresh_time = get_ist_time_str("%H:%M:%S IST")
+            
+            msg = (
+                f"💎 **GEM DETECTED** | {analysis['baseToken']['symbol']}\n"
+                f"────────────────\n"
+                f"💰 **Price:** `${analysis.get('priceUsd', '0')}`\n"
+                f"💧 **Liquidity:** `{liq_fmt}`\n"
+                f"📊 **FDV:** `{fdv_fmt}`\n"
+                f"⏳ **Age:** `{age_fmt}`\n"
+                f"🌊 **Vol (1H):** `{vol_fmt}`\n"
+                f"{trend} **Change (1H):** `{p_change}%`\n"
+                f"🎯 **Score:** `{analysis['risk']['score']}/100`\n"
+                f"🐋 **Whale:** `{'YES 🚨' if analysis['whale']['detected'] else 'NO'}`\n"
+                f"────────────────\n"
+                f"🔄 **Refreshed:** `{refresh_time}`\n"
+                f"`{analysis['address']}`"
+            )
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("👁 Watch", callback_data=f"watch:{analysis['address']}"),
+                    InlineKeyboardButton("🔄 Refresh", callback_data=f"signal_refresh:{analysis['address']}")
+                ],
+                [
+                    InlineKeyboardButton("↗ DexScreener", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{analysis['address']}")
+                ]
+            ]
+            
+            await query.message.edit_text(text=msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+            
+        except Exception as e:
+            log.error(f"Signal refresh failed: {e}")
+            await query.answer("Refresh Failed", show_alert=True)
+
     async def _render_help(self, message):
         text = (
             "❓ **SYSTEM GUIDE**\n"
@@ -446,19 +533,17 @@ class SignalBot:
     async def broadcast_signal(self, analysis: dict):
         """Sends the formatted signal to the channel"""
         
-        # Calculate changes for display
         metrics = analysis.get('metrics', {})
         vol_h1 = metrics.get('volume_h1', 0)
         p_change = metrics.get('price_change_h1', 0)
         
-        # Format numbers
         liq_fmt = f"${analysis.get('liquidity', 0):,.0f}"
         fdv_fmt = f"${analysis.get('fdv', 0):,.0f}"
         vol_fmt = f"${vol_h1:,.0f}"
         age_fmt = f"{analysis.get('age_hours', 0)}h"
         
-        # Determine trend icon
         trend = "📈" if p_change >= 0 else "📉"
+        detect_time = get_ist_time_str("%H:%M IST")
         
         msg = (
             f"💎 **GEM DETECTED** | {analysis['baseToken']['symbol']}\n"
@@ -472,12 +557,16 @@ class SignalBot:
             f"🎯 **Score:** `{analysis['risk']['score']}/100`\n"
             f"🐋 **Whale:** `{'YES 🚨' if analysis['whale']['detected'] else 'NO'}`\n"
             f"────────────────\n"
+            f"🕒 **Detected:** `{detect_time}`\n"
             f"`{analysis['address']}`"
         )
         
         keyboard = [
             [
                 InlineKeyboardButton("👁 Watch", callback_data=f"watch:{analysis['address']}"),
+                InlineKeyboardButton("🔄 Refresh", callback_data=f"signal_refresh:{analysis['address']}")
+            ],
+            [
                 InlineKeyboardButton("↗ DexScreener", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{analysis['address']}")
             ]
         ]
