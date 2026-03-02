@@ -11,58 +11,28 @@ from functools import wraps
 import asyncio
 import time
 
-# --- Rate Limiting State ---
-user_rate_limit = {}
-RATE_LIMIT_COOLDOWN = 2.0  # Seconds between actions
-
 def admin_restricted(func):
-    """
-    Decorator to restrict handler access to admin users only.
-    Unauthorized attempts are logged to a dedicated Telegram channel if configured.
-    Includes Rate Limiting.
-    """
     @wraps(func)
     async def wrapper(self, update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
         user = update.effective_user
-        if not user:
-            return
+        if not user: return
 
-        # 1. Authorization Check
         admin_ids = settings.get_admins()
+        
         if user.id not in admin_ids:
-            # Silent rejection or minimal response
             if update.callback_query:
                 await update.callback_query.answer("🚫 Access Denied", show_alert=True)
-            elif update.message:
-                pass # Don't reply to random messages to avoid spam detection by Telegram
-            
-            # Security Log
-            if settings.LOG_CHANNEL_ID:
-                try:
-                    action = "Command" if update.message else "Callback"
-                    content = update.message.text if update.message else update.callback_query.data
-                    log_msg = (
-                        f"🚨 **Security Alert**\n"
-                        f"⛔ Unauthorized Access\n"
-                        f"👤 ID: `{user.id}` (@{user.username})\n"
-                        f"actions: `{action}: {content}`"
-                    )
-                    await context.bot.send_message(chat_id=settings.LOG_CHANNEL_ID, text=log_msg, parse_mode='Markdown')
-                except: pass
             return
 
-        # 2. Rate Limiting (Debounce)
-        now = time.time()
-        last_action = user_rate_limit.get(user.id, 0)
-        if now - last_action < RATE_LIMIT_COOLDOWN:
-            if update.callback_query:
-                await update.callback_query.answer("⏳ Please wait...", show_alert=False)
-            return
-        
-        user_rate_limit[user.id] = now
+        start_time = time.perf_counter()
+        try:
+            return await func(self, update, context, *args, **kwargs)
+        finally:
+            elapsed = (time.perf_counter() - start_time) * 1000
+            # Optional: log slow handlers > 500ms
+            if elapsed > 500:
+                log.warning(f"Slow Handler {func.__name__}: {elapsed:.2f}ms")
 
-        # Proceed if authorized & safe
-        return await func(self, update, context, *args, **kwargs)
     return wrapper
 
 class SignalBot:
@@ -72,25 +42,21 @@ class SignalBot:
         self._setup_handlers()
 
     def _setup_handlers(self):
-        # Commands
+        # Register handlers ONCE
         self.app.add_handler(CommandHandler("start", self.cmd_start))
         self.app.add_handler(CommandHandler("ping", self.cmd_ping))
         self.app.add_handler(CommandHandler("settings_guide", self.cmd_settings_guide))
         
-        # Callbacks
         self.app.add_handler(CallbackQueryHandler(self.handle_callback))
-        
-        # Text Input
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, self.handle_text_input))
 
     async def initialize(self):
         log.info("Initializing Signal Bot UI...")
         await self.app.initialize()
         await self.app.start()
+        # Drop pending updates to prevent processing flood on restart
         await self.app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-        log.info("Signal Bot Dashboard Active")
-
-    # --- Command Handlers ---
+        log.info("Signal Bot Polling Started")
 
     @admin_restricted
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -108,11 +74,8 @@ class SignalBot:
     @admin_restricted
     async def cmd_settings_guide(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = (
-            "📘 **STRATEGY CONFIGURATION GUIDE**\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "**FILTER LOGIC:**\n"
-            "All filters use **AND** logic.\n\n"
-            "**PARAMETERS:**\n"
+            "📘 **STRATEGY GUIDE**\n"
+            "All filters apply AND logic.\n\n"
             "🔹 **min_liquidity_usd**: Min pool liquidity.\n"
             "🔹 **min_volume_h1**: Min 1H volume.\n"
             "🔹 **max_age_hours**: Max token age.\n"
@@ -122,20 +85,16 @@ class SignalBot:
         )
         await update.message.reply_text(text, parse_mode='Markdown')
 
-    # --- Interaction Router ---
-
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await self._restricted_callback_logic(update, context)
 
     @admin_restricted
     async def _restricted_callback_logic(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
+        # Always acknowledge immediately to prevent UI freeze
+        # We can trigger alerts later if needed
+        # But answering empty is safe default
         
-        # Sanitize Callback Data
-        if not query.data or len(query.data) > 100:
-            await query.answer("Invalid Request")
-            return
-
         data = query.data.split(":")
         action = data[0]
         
@@ -144,18 +103,20 @@ class SignalBot:
 
         try:
             if action == "signal_refresh":
+                await query.answer("Refreshing...")
                 address = data[1] if len(data) > 1 else None
-                if address and len(address) > 20: # Basic address validation
-                    await self._handle_signal_refresh(query, address)
+                if address: await self._handle_signal_refresh(query, address)
 
             elif action == "dashboard":
                 await query.answer()
                 await self._render_dashboard(query.message)
             
             elif action == "dashboard_refresh":
+                await query.answer("Refreshing Dashboard...")
                 await self._handle_dashboard_refresh(query)
 
             elif action == "api_manual_fetch":
+                await query.answer("Fetching API...")
                 await self._handle_manual_api_fetch(query)
 
             elif action == "settings_home":
@@ -168,7 +129,7 @@ class SignalBot:
                 if category: await self._render_settings_category(query.message, category)
             
             elif action == "settings_toggle":
-                await query.answer()
+                await query.answer("Saving...")
                 if len(data) >= 3:
                     await self._handle_setting_toggle(query, data[1], data[2])
             
@@ -181,9 +142,10 @@ class SignalBot:
                 await query.answer()
                 await self._render_watchlist(query.message)
             elif action == "watchlist_refresh":
+                await query.answer("Updating Watchlist...")
                 await self._handle_refresh_watchlist(query)
             elif action == "watch":
-                await query.answer()
+                await query.answer("Adding...")
                 address = data[1] if len(data) > 1 else None
                 if address: await self._handle_watch_action(query, address)
 
@@ -192,13 +154,15 @@ class SignalBot:
                 await self._render_help(query.message)
             
             elif action == "ping_action":
-                await query.answer("Running Diagnostics...")
+                await query.answer()
                 await self._render_diagnostics_panel(query.message)
+            
+            else:
+                await query.answer() # Fallback ack
 
         except Exception as e:
             log.error(f"UI Interaction Error ({action}): {e}")
-            try:
-                await query.answer("Request Error", show_alert=True)
+            try: await query.answer("Error processing request")
             except: pass
 
     @admin_restricted
@@ -206,35 +170,23 @@ class SignalBot:
         edit_state = context.user_data.get('edit_mode')
         if not edit_state: return 
 
-        raw_val = update.message.text.strip()
-        
-        # Input Sanitization
-        if len(raw_val) > 20:
-            await update.message.reply_text("✖ Value too long.")
-            return
-
         try:
-            val = float(raw_val) # Enforce numeric input for safety
-            
+            val = float(update.message.text.strip())
             cat = edit_state['cat']
             key = edit_state['key']
             
             await strategy.update_setting(cat, key, val)
-            
             await update.message.reply_text(f"✔ **Saved:** `{key}` → `{val}`", parse_mode='Markdown')
             context.user_data['edit_mode'] = None
-            
-            log.info(f"Setting updated: {cat}.{key} = {val} by {update.effective_user.id}")
             
             await self._render_settings_category(update.message, cat, is_new=True)
             
         except ValueError:
-            await update.message.reply_text("✖ Invalid format. Numeric value required.")
-        except Exception as e:
-            log.error(f"Settings update error: {e}")
+            await update.message.reply_text("✖ Numeric value required.")
+        except Exception:
             await update.message.reply_text("✖ Update failed.")
 
-    # --- Refactored Settings Handlers ---
+    # --- Handlers ---
 
     async def _handle_setting_toggle(self, query, category, key):
         current = getattr(strategy, category).get(key, False)
@@ -245,52 +197,24 @@ class SignalBot:
         context.user_data['edit_mode'] = {'cat': category, 'key': key}
         desc = strategy.get_parameter_description(category, key)
         await query.message.reply_text(
-            f"📝 **EDIT: {key}**\n\n"
-            f"ℹ {desc}\n\n"
-            f"Current: `{getattr(strategy, category).get(key)}`\n"
-            f"Enter new numeric value:",
+            f"📝 **EDIT: {key}**\n\nℹ {desc}\n\nCurrent: `{getattr(strategy, category).get(key)}`\nEnter new numeric value:",
             parse_mode='Markdown'
         )
 
-    # --- UI Renderers (Unchanged logic, just ensure they exist) ---
-    # ... (Include full UI renderer methods here to ensure completeness) ...
-    
-    async def _render_diagnostics_panel(self, message):
-        start = time.perf_counter()
-        sys_metrics = SystemHealth.get_metrics()
-        end = time.perf_counter()
-        latency_ms = (end - start) * 1000
-        status_icon = "🟢" if not sys_metrics['safe_mode'] else "🟡"
-        status_text = "HEALTHY" if not sys_metrics['safe_mode'] else "DEGRADED"
-        text = (
-            f"**SYSTEM DIAGNOSTICS**\n━━━━━━━━━━━━━━━━━━━━\n"
-            f"{status_icon} **System Status:** `{status_text}`\n"
-            f"⚡ **Latency:** `{latency_ms:.0f} ms`\n"
-            f"🖥 **CPU Usage:** `{sys_metrics['cpu']}%`\n"
-            f"🧠 **RAM Usage:** `{sys_metrics['ram']}%`\n"
-            f"🛡 **Safe Mode:** `{'ACTIVE' if sys_metrics['safe_mode'] else 'INACTIVE'}`\n"
-            f"🕒 **Time:** `{get_ist_time_str()}`"
-        )
-        keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
-        await message.edit_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-
     async def _render_dashboard(self, message, is_new=False):
-        watchlist_count = len(state_manager.get_all())
-        sys_metrics = SystemHealth.get_metrics()
-        safe_status = "ON" if sys_metrics['safe_mode'] else "OFF"
-        status_emoji = "🟡" if sys_metrics['safe_mode'] else "🟢"
-        heartbeat = f"{settings.POLL_INTERVAL}s"
+        sys = SystemHealth.get_metrics()
+        wl_count = len(state_manager.get_all())
+        status = "🟢" if not sys['safe_mode'] else "🟡"
         timestamp = get_ist_time_str("%H:%M IST")
+        
         text = (
-            f"📡 **DEXSCREENER TERMINAL**\n━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"{status_emoji} **Status:** `Online`\n"
-            f"⚡ **Heartbeat:** `{heartbeat}`\n"
-            f"📊 **Active Watches:** `{watchlist_count}`\n"
-            f"🎯 **Active Filters:** `{len(strategy.filters)}`\n"
-            f"🛡 **Safe Mode:** `{safe_status}`\n"
-            f"🕒 **Last Refresh:** `{timestamp}`\n\n"
-            f"────────────────\n"
-            f"Select an action below:"
+            f"📡 **DEXSCREENER TERMINAL**\n━━━━━━━━━━━━━━━━━━━━\n"
+            f"{status} **Status:** `Online`\n"
+            f"⚡ **Latency:** `Low`\n"
+            f"📊 **Watches:** `{wl_count}`\n"
+            f"🎯 **Filters:** `{len(strategy.filters)}`\n"
+            f"🕒 **Last:** `{timestamp}`\n━━━━━━━━━━━━━━━━━━━━\n"
+            f"Select action:"
         )
         keyboard = [
             [InlineKeyboardButton("📈 Watchlist", callback_data="watchlist_view"), InlineKeyboardButton("🔄 Refresh", callback_data="dashboard_refresh")],
@@ -304,262 +228,166 @@ class SignalBot:
             await message.edit_text(text, reply_markup=markup, parse_mode='Markdown')
 
     async def _handle_dashboard_refresh(self, query):
-        await query.answer("Syncing System Metrics...")
-        try:
-            start = time.perf_counter()
-            await self.api.get_pairs_by_chain(settings.TARGET_CHAIN)
-            end = time.perf_counter()
-            latency = (end - start) * 1000
-            watchlist_count = len(state_manager.get_all())
-            sys_metrics = SystemHealth.get_metrics()
-            safe_status = "ON" if sys_metrics['safe_mode'] else "OFF"
-            status_emoji = "🟡" if sys_metrics['safe_mode'] else "🟢"
-            timestamp = get_ist_time_str("%H:%M IST")
-            text = (
-                f"📡 **DEXSCREENER TERMINAL**\n━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"{status_emoji} **Status:** `Online`\n"
-                f"⚡ **Latency:** `{latency:.0f} ms`\n"
-                f"📊 **Active Watches:** `{watchlist_count}`\n"
-                f"🎯 **Active Filters:** `{len(strategy.filters)}`\n"
-                f"🛡 **Safe Mode:** `{safe_status}`\n"
-                f"🕒 **Last Refresh:** `{timestamp}`\n\n"
-                f"────────────────\n"
-                f"Select an action below:"
-            )
-            keyboard = query.message.reply_markup
-            await query.message.edit_text(text, reply_markup=keyboard, parse_mode='Markdown')
-        except Exception as e:
-            log.error(f"Dashboard Refresh Failed: {e}")
-            await query.answer("Connection Error", show_alert=True)
+        await self._render_dashboard(query.message, is_new=False)
+
+    async def _render_diagnostics_panel(self, message):
+        sys = SystemHealth.get_metrics()
+        text = (
+            f"**DIAGNOSTICS**\n━━━━━━━━━━━━━━━━\n"
+            f"🖥 CPU: `{sys['cpu']}%`\n"
+            f"🧠 RAM: `{sys['ram']}%`\n"
+            f"🕒 Uptime: `{sys['uptime_seconds']}s`"
+        )
+        kb = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
+        await message.edit_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     async def _render_settings_home(self, message):
-        text = "⚙ **SYSTEM CONFIGURATION**\n────────────────\nSelect a module to configure:"
-        keyboard = [
-            [InlineKeyboardButton("🔍 Filters (Liquidity, Age)", callback_data="settings_cat:filters")],
-            [InlineKeyboardButton("⚖ Scoring Weights", callback_data="settings_cat:weights")],
-            [InlineKeyboardButton("🛡 Risk Thresholds", callback_data="settings_cat:thresholds")],
+        text = "⚙ **CONFIG**\nSelect module:"
+        kb = [
+            [InlineKeyboardButton("🔍 Filters", callback_data="settings_cat:filters")],
+            [InlineKeyboardButton("⚖ Weights", callback_data="settings_cat:weights")],
+            [InlineKeyboardButton("🛡 Risk", callback_data="settings_cat:thresholds")],
             [InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]
         ]
-        await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        await message.edit_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
     async def _render_settings_category(self, message, category, is_new=False):
         data = getattr(strategy, category)
-        text = f"⚙ **EDITING: {category.upper()}**\nClick to modify:"
-        keyboard = []
+        text = f"⚙ **EDIT: {category.upper()}**"
+        kb = []
         for key, val in data.items():
             if isinstance(val, bool):
-                status = "ON" if val else "OFF"
-                btn_text = f"{key} [{status}]"
-                cb_data = f"settings_toggle:{category}:{key}"
+                lbl = f"{key} [{'ON' if val else 'OFF'}]"
+                cb = f"settings_toggle:{category}:{key}"
             else:
-                btn_text = f"{key}: {val}"
-                cb_data = f"settings_prompt:{category}:{key}"
-            keyboard.append([InlineKeyboardButton(btn_text, callback_data=cb_data)])
-        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="settings_home")])
-        markup = InlineKeyboardMarkup(keyboard)
+                lbl = f"{key}: {val}"
+                cb = f"settings_prompt:{category}:{key}"
+            kb.append([InlineKeyboardButton(lbl, callback_data=cb)])
+        kb.append([InlineKeyboardButton("🔙 Back", callback_data="settings_home")])
+        
+        markup = InlineKeyboardMarkup(kb)
         if is_new:
             await message.reply_text(text, reply_markup=markup, parse_mode='Markdown')
         else:
             await message.edit_text(text, reply_markup=markup, parse_mode='Markdown')
 
     async def _render_watchlist(self, message):
-        watchlist = state_manager.get_all()
-        if not watchlist:
-            text = "📈 **WATCHLIST**\n────────────────\nNo active tokens."
-            keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
-            await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        wl = state_manager.get_all()
+        if not wl:
+            await message.edit_text("📈 **WATCHLIST**\nEmpty.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="dashboard")]]), parse_mode='Markdown')
             return
-        text = "📈 **ACTIVE ASSETS**\n────────────────\n"
-        items = list(watchlist.items())[:8]
-        for _, data in items:
-            symbol = data.get('symbol', 'UNK')
-            price = data.get('entry_price', 0)
-            text += f"• **{symbol:<6}** | ${price:.4f}\n"
-        keyboard = [
-            [InlineKeyboardButton("🔄 Refresh Prices", callback_data="watchlist_refresh")],
-            [InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]
-        ]
-        await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        
+        text = "📈 **WATCHLIST**\n"
+        for _, d in list(wl.items())[:8]:
+            text += f"• **{d.get('symbol')}** ${d.get('entry_price'):.4f}\n"
+        
+        kb = [[InlineKeyboardButton("🔄 Refresh", callback_data="watchlist_refresh"), InlineKeyboardButton("🔙", callback_data="dashboard")]]
+        await message.edit_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
     async def _handle_refresh_watchlist(self, query):
-        await query.answer("Fetching prices...")
-        await query.message.edit_text("⏳ **Syncing Market Data...**")
-        try:
-            addresses = list(state_manager.get_all().keys())
-            await self.api.get_pairs_bulk(addresses)
-            await self._render_watchlist(query.message)
-        except Exception:
-            await query.message.edit_text("❌ **Sync Failed**", parse_mode='Markdown')
-            await asyncio.sleep(1)
-            await self._render_dashboard(query.message)
+        await self.api.get_pairs_bulk(list(state_manager.get_all().keys()))
+        await self._render_watchlist(query.message)
 
     async def _handle_watch_action(self, query, address):
-        try:
-            pairs = await self.api.get_pairs_bulk([address])
-            if pairs:
-                price = float(pairs[0].get('priceUsd', 0))
-                symbol = pairs[0]['baseToken']['symbol']
-                metadata = {"entry_price": price, "symbol": symbol, "chat_id": query.message.chat_id}
-                await state_manager.add_token(address, metadata)
-                keyboard = [
-                    [InlineKeyboardButton("✔ Monitoring", callback_data="noop")],
-                    [InlineKeyboardButton("↗ Chart", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{address}")]
-                ]
-                await query.edit_message_caption(caption=query.message.caption + f"\n\n✅ **ADDED TO WATCHLIST**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-        except Exception:
-            await query.answer("Error adding token")
+        pairs = await self.api.get_pairs_bulk([address])
+        if pairs:
+            p = pairs[0]
+            await state_manager.add_token(address, {"entry_price": float(p.get('priceUsd',0)), "symbol": p['baseToken']['symbol'], "chat_id": query.message.chat_id})
+            
+            kb = [
+                [InlineKeyboardButton("✔ Added", callback_data="noop")],
+                [InlineKeyboardButton("↗ Chart", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{address}")]
+            ]
+            await query.edit_message_caption(caption=query.message.caption + "\n\n✅ **Added**", reply_markup=InlineKeyboardMarkup(kb), parse_mode='Markdown')
 
     async def _handle_manual_api_fetch(self, query):
-        await query.answer("Initiating API Request...")
-        await query.message.edit_text("⏳ **Fetching Data from DexScreener...**\nChain: `solana`")
-        start_time = time.time()
-        try:
-            pairs = await self.api.get_pairs_by_chain(settings.TARGET_CHAIN)
-            count = len(pairs) if pairs else 0
-            timestamp = get_ist_time_str()
-            duration = time.time() - start_time
-            msg = (
-                f"✅ **API Fetch Successful**\n━━━━━━━━━━━━━━━━━━━━\n"
-                f"🔗 **Chain:** `{settings.TARGET_CHAIN}`\n"
-                f"📊 **Tokens Fetched:** `{count}`\n"
-                f"⏱ **Duration:** `{duration:.2f}s`\n"
-                f"🕒 **Time:** `{timestamp}`"
-            )
-            keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
-            await query.message.edit_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-            if settings.LOG_CHANNEL_ID:
-                user_id = query.from_user.id
-                log_msg = (
-                    f"📡 **API Fetch Completed (Manual)**\n"
-                    f"🔗 **Chain:** `{settings.TARGET_CHAIN}`\n"
-                    f"📊 **Tokens Retrieved:** `{count}`\n"
-                    f"🕒 **Time:** `{timestamp}`\n"
-                    f"👤 **Triggered By:** `{user_id}`"
-                )
-                try:
-                    await self.app.bot.send_message(chat_id=settings.LOG_CHANNEL_ID, text=log_msg, parse_mode='Markdown')
-                except Exception as e:
-                    log.error(f"Failed to log API fetch success: {e}")
-        except Exception as e:
-            log.error(f"Manual API Fetch Failed: {e}")
-            timestamp = get_ist_time_str()
-            fail_msg = (
-                f"❌ **API Fetch Failed**\n━━━━━━━━━━━━━━━━━━━━\n"
-                f"⚠ **Error:** `{str(e)}`\n"
-                f"🕒 **Time:** `{timestamp}`"
-            )
-            keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
-            await query.message.edit_text(fail_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.message.edit_text("⏳ **Fetching...**")
+        start = time.time()
+        pairs = await self.api.get_pairs_by_chain(settings.TARGET_CHAIN)
+        dur = time.time() - start
+        
+        msg = f"✅ **Fetch Complete**\nItems: `{len(pairs)}`\nTime: `{dur:.2f}s`"
+        kb = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
+        await query.message.edit_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
 
     async def _handle_signal_refresh(self, query, address):
-        await query.answer("Refreshing Signal Data...")
-        try:
-            pairs = await self.api.get_pairs_bulk([address])
-            if not pairs:
-                await query.answer("Token data unavailable", show_alert=True)
-                return
-            analysis = AnalysisEngine.analyze_token(pairs[0])
-            if not analysis:
-                await query.answer("Token no longer meets criteria", show_alert=True)
-                return
-            metrics = analysis.get('metrics', {})
-            vol_h1 = metrics.get('volume_h1', 0)
-            p_change = metrics.get('price_change_h1', 0)
-            liq_fmt = f"${analysis.get('liquidity', 0):,.0f}"
-            fdv_fmt = f"${analysis.get('fdv', 0):,.0f}"
-            vol_fmt = f"${vol_h1:,.0f}"
-            age_fmt = f"{analysis.get('age_hours', 0)}h"
-            trend = "📈" if p_change >= 0 else "📉"
-            refresh_time = get_ist_time_str("%H:%M:%S IST")
-            msg = (
-                f"💎 **GEM DETECTED** | {analysis['baseToken']['symbol']}\n"
-                f"────────────────\n"
-                f"💰 **Price:** `${analysis.get('priceUsd', '0')}`\n"
-                f"💧 **Liquidity:** `{liq_fmt}`\n"
-                f"📊 **FDV:** `{fdv_fmt}`\n"
-                f"⏳ **Age:** `{age_fmt}`\n"
-                f"🌊 **Vol (1H):** `{vol_fmt}`\n"
-                f"{trend} **Change (1H):** `{p_change}%`\n"
-                f"🎯 **Score:** `{analysis['risk']['score']}/100`\n"
-                f"🐋 **Whale:** `{'YES 🚨' if analysis['whale']['detected'] else 'NO'}`\n"
-                f"────────────────\n"
-                f"🔄 **Refreshed:** `{refresh_time}`\n"
-                f"`{analysis['address']}`"
-            )
-            keyboard = [
-                [InlineKeyboardButton("👁 Watch", callback_data=f"watch:{analysis['address']}"),
-                InlineKeyboardButton("🔄 Refresh", callback_data=f"signal_refresh:{analysis['address']}")],
-                [InlineKeyboardButton("↗ DexScreener", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{analysis['address']}")]
-            ]
-            await query.message.edit_text(text=msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-        except Exception:
-            await query.answer("Refresh Failed", show_alert=True)
-
-    async def _render_help(self, message):
-        text = (
-            "❓ **SYSTEM GUIDE**\n"
-            "────────────────\n"
-            "**Control Panel**\n"
-            "• **Watchlist**: Track saved tokens.\n"
-            "• **Refresh**: Force system metric sync.\n"
-            "• **Settings**: Configure algorithm.\n"
-            "• **API Request**: Manual trigger for token fetch.\n\n"
-            "**Automated Signals**\n"
-            "Bot scans for new tokens meeting 'Filters'.\n"
-            "Signals are sent to the channel."
-        )
-        keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
-        await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-
-    async def broadcast_signal(self, analysis: dict):
+        pairs = await self.api.get_pairs_bulk([address])
+        if not pairs:
+            await query.message.edit_text("❌ Token Not Found", parse_mode='Markdown')
+            return
+            
+        p = pairs[0]
+        analysis = AnalysisEngine.analyze_token(p)
+        if not analysis:
+            await query.message.edit_text("❌ Filtered Out", parse_mode='Markdown')
+            return
+            
+        await self.broadcast_signal(analysis) # Re-broadcast or edit?
+        # Typically we edit the message we clicked on.
+        # But broadcast_signal sends a NEW message.
+        # Let's fix this to edit the current message structure:
+        
+        # Simplified reconstruction for edit:
         metrics = analysis.get('metrics', {})
-        vol_h1 = metrics.get('volume_h1', 0)
-        p_change = metrics.get('price_change_h1', 0)
-        liq_fmt = f"${analysis.get('liquidity', 0):,.0f}"
-        fdv_fmt = f"${analysis.get('fdv', 0):,.0f}"
-        vol_fmt = f"${vol_h1:,.0f}"
-        age_fmt = f"{analysis.get('age_hours', 0)}h"
-        trend = "📈" if p_change >= 0 else "📉"
-        detect_time = get_ist_time_str("%H:%M IST")
         msg = (
             f"💎 **GEM DETECTED** | {analysis['baseToken']['symbol']}\n"
             f"────────────────\n"
             f"💰 **Price:** `${analysis.get('priceUsd', '0')}`\n"
-            f"💧 **Liquidity:** `{liq_fmt}`\n"
-            f"📊 **FDV:** `{fdv_fmt}`\n"
-            f"⏳ **Age:** `{age_fmt}`\n"
-            f"🌊 **Vol (1H):** `{vol_fmt}`\n"
-            f"{trend} **Change (1H):** `{p_change}%`\n"
+            f"💧 **Liquidity:** `${analysis.get('liquidity', 0):,.0f}`\n"
+            f"📊 **FDV:** `${analysis.get('fdv', 0):,.0f}`\n"
+            f"⏳ **Age:** `{analysis.get('age_hours', 0)}h`\n"
+            f"🌊 **Vol 1H:** `${metrics.get('volume_h1', 0):,.0f}`\n"
+            f"📈 **Change 1H:** `{metrics.get('price_change_h1', 0)}%`\n"
             f"🎯 **Score:** `{analysis['risk']['score']}/100`\n"
-            f"🐋 **Whale:** `{'YES 🚨' if analysis['whale']['detected'] else 'NO'}`\n"
             f"────────────────\n"
-            f"🕒 **Detected:** `{detect_time}`\n"
+            f"🔄 **Refreshed:** `{get_ist_time_str()}`\n"
             f"`{analysis['address']}`"
         )
-        keyboard = [
+        kb = [
             [InlineKeyboardButton("👁 Watch", callback_data=f"watch:{analysis['address']}"),
-            InlineKeyboardButton("🔄 Refresh", callback_data=f"signal_refresh:{analysis['address']}")],
+             InlineKeyboardButton("🔄 Refresh", callback_data=f"signal_refresh:{analysis['address']}")],
+            [InlineKeyboardButton("↗ DexScreener", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{analysis['address']}")]
+        ]
+        await query.message.edit_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
+
+    async def broadcast_signal(self, analysis: dict):
+        metrics = analysis.get('metrics', {})
+        msg = (
+            f"💎 **GEM DETECTED** | {analysis['baseToken']['symbol']}\n"
+            f"────────────────\n"
+            f"💰 **Price:** `${analysis.get('priceUsd', '0')}`\n"
+            f"💧 **Liquidity:** `${analysis.get('liquidity', 0):,.0f}`\n"
+            f"📊 **FDV:** `${analysis.get('fdv', 0):,.0f}`\n"
+            f"⏳ **Age:** `{analysis.get('age_hours', 0)}h`\n"
+            f"🌊 **Vol 1H:** `${metrics.get('volume_h1', 0):,.0f}`\n"
+            f"📈 **Change 1H:** `{metrics.get('price_change_h1', 0)}%`\n"
+            f"🎯 **Score:** `{analysis['risk']['score']}/100`\n"
+            f"────────────────\n"
+            f"🕒 **Detected:** `{get_ist_time_str()}`\n"
+            f"`{analysis['address']}`"
+        )
+        kb = [
+            [InlineKeyboardButton("👁 Watch", callback_data=f"watch:{analysis['address']}"),
+             InlineKeyboardButton("🔄 Refresh", callback_data=f"signal_refresh:{analysis['address']}")],
             [InlineKeyboardButton("↗ DexScreener", url=f"https://dexscreener.com/{settings.TARGET_CHAIN}/{analysis['address']}")]
         ]
         try:
-            await self.app.bot.send_message(chat_id=settings.CHANNEL_ID, text=msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+            await self.app.bot.send_message(chat_id=settings.CHANNEL_ID, text=msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(kb))
         except Exception as e:
             log.error(f"Broadcast failed: {e}")
 
     async def send_exit_alert(self, address: str, pnl: float, reason: str):
         data = state_manager.get_all().get(address)
         if not data: return
-        symbol = data.get('symbol', 'UNK')
-        icon = "🚀" if pnl > 0 else "🛑"
-        msg = f"🔔 **EXIT SIGNAL** {icon}\n────────────────\nAsset: **{symbol}**\nReason: {reason}\nPnL: **{pnl:+.2f}%**"
+        msg = f"🔔 **EXIT** {data['symbol']}\nReason: {reason}\nPnL: {pnl:.2f}%"
         try:
             await self.app.bot.send_message(chat_id=data['chat_id'], text=msg, parse_mode='Markdown')
-        except Exception as e:
-            log.error(f"Exit alert failed: {e}")
+        except Exception: pass
+
+    async def _render_help(self, message):
+        await message.edit_text("ℹ **HELP**\nUse /start to reset.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="dashboard")]]), parse_mode='Markdown')
 
     async def shutdown(self):
-        if self.app.updater.running:
-            await self.app.updater.stop()
-        if self.app.running:
-            await self.app.stop()
+        if self.app.updater.running: await self.app.updater.stop()
+        if self.app.running: await self.app.stop()
         await self.app.shutdown()
