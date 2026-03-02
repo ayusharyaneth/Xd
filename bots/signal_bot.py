@@ -36,11 +36,15 @@ class SignalBot:
         self._setup_handlers()
 
     def _setup_handlers(self):
+        # Commands
         self.app.add_handler(CommandHandler("start", self.cmd_start))
         self.app.add_handler(CommandHandler("ping", self.cmd_ping))
         self.app.add_handler(CommandHandler("settings_guide", self.cmd_settings_guide))
         
+        # Callbacks - Register ONCE
         self.app.add_handler(CallbackQueryHandler(self.handle_callback))
+        
+        # Text Input
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, self.handle_text_input))
 
     async def initialize(self):
@@ -91,9 +95,7 @@ class SignalBot:
     async def _restricted_callback_logic(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         
-        # Ensure we always acknowledge to stop loading spinner, unless handled later
-        # We'll ack inside specific handlers if needed or default here
-        # await query.answer() # Ack early might be safer
+        # log.debug(f"Callback received: {query.data}")
         
         data = query.data.split(":")
         action = data[0]
@@ -158,6 +160,11 @@ class SignalBot:
             elif action == "help_menu":
                 await query.answer()
                 await self._render_help(query.message)
+            
+            # Catch ping action if triggered via button
+            elif action == "ping_action":
+                await query.answer("Running Diagnostics...")
+                await self._render_diagnostics_panel(query.message)
 
         except Exception as e:
             log.error(f"UI Interaction Error ({action}): {e}")
@@ -187,62 +194,31 @@ class SignalBot:
             
         except Exception as e:
             log.error(f"Settings update error: {e}")
-            await update.message.reply_text("✖ Invalid format. Please enter a valid number.")
-
-    # --- Manual API Fetch Logic ---
-
-    async def _handle_manual_api_fetch(self, query):
-        await query.answer("Initiating API Request...")
-        await query.message.edit_text("⏳ **Fetching Data from DexScreener...**\nChain: `solana`")
-        
-        start_time = time.time()
-        try:
-            pairs = await self.api.get_pairs_by_chain(settings.TARGET_CHAIN)
-            count = len(pairs) if pairs else 0
-            
-            timestamp = get_ist_time_str()
-            duration = time.time() - start_time
-            
-            msg = (
-                f"✅ **API Fetch Successful**\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"🔗 **Chain:** `{settings.TARGET_CHAIN}`\n"
-                f"📊 **Tokens Fetched:** `{count}`\n"
-                f"⏱ **Duration:** `{duration:.2f}s`\n"
-                f"🕒 **Time:** `{timestamp}`"
-            )
-            
-            keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
-            await query.message.edit_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
-            
-            if settings.LOG_CHANNEL_ID:
-                user_id = query.from_user.id
-                log_msg = (
-                    f"📡 **API Fetch Completed (Manual)**\n"
-                    f"🔗 **Chain:** `{settings.TARGET_CHAIN}`\n"
-                    f"📊 **Tokens Retrieved:** `{count}`\n"
-                    f"🕒 **Time:** `{timestamp}`\n"
-                    f"👤 **Triggered By:** `{user_id}`"
-                )
-                try:
-                    await self.app.bot.send_message(chat_id=settings.LOG_CHANNEL_ID, text=log_msg, parse_mode='Markdown')
-                except Exception as e:
-                    log.error(f"Failed to log API fetch success: {e}")
-
-        except Exception as e:
-            log.error(f"Manual API Fetch Failed: {e}")
-            timestamp = get_ist_time_str()
-            
-            fail_msg = (
-                f"❌ **API Fetch Failed**\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n"
-                f"⚠ **Error:** `{str(e)}`\n"
-                f"🕒 **Time:** `{timestamp}`"
-            )
-            keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
-            await query.message.edit_text(fail_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+            await update.message.reply_text("✖ Invalid format.")
 
     # --- UI Renderers ---
+
+    async def _render_diagnostics_panel(self, message):
+        start = time.perf_counter()
+        sys_metrics = SystemHealth.get_metrics()
+        end = time.perf_counter()
+        latency_ms = (end - start) * 1000
+        
+        status_icon = "🟢" if not sys_metrics['safe_mode'] else "🟡"
+        status_text = "HEALTHY" if not sys_metrics['safe_mode'] else "DEGRADED"
+        
+        text = (
+            f"**SYSTEM DIAGNOSTICS**\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{status_icon} **System Status:** `{status_text}`\n"
+            f"⚡ **Latency:** `{latency_ms:.0f} ms`\n"
+            f"🖥 **CPU Usage:** `{sys_metrics['cpu']}%`\n"
+            f"🧠 **RAM Usage:** `{sys_metrics['ram']}%`\n"
+            f"🛡 **Safe Mode:** `{'ACTIVE' if sys_metrics['safe_mode'] else 'INACTIVE'}`\n"
+            f"🕒 **Time:** `{get_ist_time_str()}`"
+        )
+        keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
+        await message.edit_text(text, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def _render_dashboard(self, message, is_new=False):
         watchlist_count = len(state_manager.get_all())
@@ -409,6 +385,57 @@ class SignalBot:
                 )
         except Exception:
             await query.answer("Error adding token")
+
+    async def _handle_manual_api_fetch(self, query):
+        await query.answer("Initiating API Request...")
+        await query.message.edit_text("⏳ **Fetching Data from DexScreener...**\nChain: `solana`")
+        
+        start_time = time.time()
+        try:
+            pairs = await self.api.get_pairs_by_chain(settings.TARGET_CHAIN)
+            count = len(pairs) if pairs else 0
+            
+            timestamp = get_ist_time_str()
+            duration = time.time() - start_time
+            
+            msg = (
+                f"✅ **API Fetch Successful**\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"🔗 **Chain:** `{settings.TARGET_CHAIN}`\n"
+                f"📊 **Tokens Fetched:** `{count}`\n"
+                f"⏱ **Duration:** `{duration:.2f}s`\n"
+                f"🕒 **Time:** `{timestamp}`"
+            )
+            
+            keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
+            await query.message.edit_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+            
+            if settings.LOG_CHANNEL_ID:
+                user_id = query.from_user.id
+                log_msg = (
+                    f"📡 **API Fetch Completed (Manual)**\n"
+                    f"🔗 **Chain:** `{settings.TARGET_CHAIN}`\n"
+                    f"📊 **Tokens Retrieved:** `{count}`\n"
+                    f"🕒 **Time:** `{timestamp}`\n"
+                    f"👤 **Triggered By:** `{user_id}`"
+                )
+                try:
+                    await self.app.bot.send_message(chat_id=settings.LOG_CHANNEL_ID, text=log_msg, parse_mode='Markdown')
+                except Exception as e:
+                    log.error(f"Failed to log API fetch success: {e}")
+
+        except Exception as e:
+            log.error(f"Manual API Fetch Failed: {e}")
+            timestamp = get_ist_time_str()
+            
+            fail_msg = (
+                f"❌ **API Fetch Failed**\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"⚠ **Error:** `{str(e)}`\n"
+                f"🕒 **Time:** `{timestamp}`"
+            )
+            keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
+            await query.message.edit_text(fail_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def _handle_signal_refresh(self, query, address):
         await query.answer("Refreshing Signal Data...")
