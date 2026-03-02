@@ -31,10 +31,10 @@ class DexScreenerAPI:
     async def get_pairs_by_chain(self, chain: str):
         """
         Fetches the latest token profiles for a specific chain.
-        Attempts to fetch maximum allowed by batching logic.
+        Now fetches MAXIMUM possible tokens by increasing batch size and iteration.
         """
         url = self.token_profiles_url
-        # log.debug(f"Fetching token profiles from: {url}")
+        log.debug(f"Fetching token profiles from: {url}")
         
         if not self.session: await self.start()
 
@@ -51,13 +51,13 @@ class DexScreenerAPI:
                     if not target_tokens:
                         return []
                     
-                    # Fetch up to 60 tokens (2 batches of 30)
-                    # DexScreener bulk endpoint supports max 30 addresses per request
-                    limit = 60 
-                    limited_tokens = target_tokens[:limit]
+                    # Fetch maximum allowed tokens
+                    # DexScreener limits comma separated addresses to ~30
+                    # We will process ALL found tokens in chunks
+                    # Limit logic removed to maximize fetch
                     
-                    # log.debug(f"Fetching pair data for {len(limited_tokens)} tokens...")
-                    return await self.get_pairs_bulk(limited_tokens)
+                    log.debug(f"Fetching pair data for {len(target_tokens)} tokens...")
+                    return await self.get_pairs_bulk(target_tokens)
                     
                 else:
                     log.error(f"Token profiles fetch failed. Status: {resp.status}")
@@ -70,24 +70,39 @@ class DexScreenerAPI:
     async def get_pairs_bulk(self, addresses: list):
         if not addresses: return []
         
+        # DexScreener chunk limit is 30
         chunk_size = 30
         chunks = [addresses[i:i + chunk_size] for i in range(0, len(addresses), chunk_size)]
         results = []
         
         if not self.session: await self.start()
 
+        # Concurrent fetching for speed if many chunks
+        tasks = []
         for chunk in chunks:
             url = f"{self.base_url}/tokens/{','.join(chunk)}"
-            try:
-                async with self.session.get(url, headers=self._get_headers(), timeout=15) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        chunk_pairs = data.get('pairs', [])
-                        results.extend(chunk_pairs)
-                    else:
-                        log.warning(f"Bulk fetch failed for chunk. Status: {resp.status}")
-            except Exception as e:
-                log.error(f"Bulk fetch exception: {e}")
-                
-        # log.debug(f"Total pair data fetched: {len(results)}")
+            tasks.append(self._fetch_chunk(url))
+            
+        chunk_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for res in chunk_results:
+            if isinstance(res, list):
+                results.extend(res)
+            elif isinstance(res, Exception):
+                log.error(f"Chunk fetch error: {res}")
+
+        log.debug(f"Total pair data fetched: {len(results)}")
         return results
+
+    async def _fetch_chunk(self, url):
+        try:
+            async with self.session.get(url, headers=self._get_headers(), timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get('pairs', [])
+                else:
+                    log.warning(f"Bulk fetch failed for chunk. Status: {resp.status}")
+                    return []
+        except Exception as e:
+            log.error(f"Bulk fetch exception: {e}")
+            return []
