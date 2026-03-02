@@ -1,32 +1,35 @@
 import sys
 from loguru import logger
+import re
 
-# Expose the logger object immediately.
-# This ensures that other modules (like config/settings.py) can import 'log' 
-# without triggering circular dependency errors or NameErrors.
-log = logger
+def mask_sensitive_data(message: str) -> str:
+    """Masks potentially sensitive patterns like tokens or keys."""
+    # Pattern for typical bot tokens 123456:ABC-DEF...
+    token_pattern = r"\d{9,10}:[A-Za-z0-9_-]{35}"
+    return re.sub(token_pattern, "[MASKED_TOKEN]", message)
 
 def setup_logger(level: str = "INFO"):
-    """
-    Configures the logger handlers.
-    This must be called explicitly from main.py after settings are loaded.
-    """
-    # Remove default handler
     logger.remove()
     
-    # Console Handler
+    # Secure Console Handler (No sensitive data)
     logger.add(
         sys.stderr,
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>",
         level=level,
-        colorize=True
+        colorize=True,
+        filter=lambda record: mask_sensitive_data(record["message"])
     )
     
-    # File Handler (Rotation enabled)
+    # Secure File Handler (Rotation enabled, masked)
     logger.add(
         "logs/app.log",
-        rotation="100 MB",
+        rotation="50 MB",
         retention="7 days",
         level="DEBUG",
-        compression="zip"
+        compression="zip",
+        filter=lambda record: mask_sensitive_data(record["message"])
     )
+    
+    return logger
+
+log = setup_logger()
