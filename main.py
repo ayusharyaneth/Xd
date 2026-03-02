@@ -35,10 +35,8 @@ async def pipeline_task():
                 continue
 
             # 2. Fetch Data
-            # Note: The API likely uses a search query. 
-            # This returns 'relevant' tokens, which might be old.
-            # The AnalysisEngine MUST filter by Age.
-            log.debug("Fetching pairs from DexScreener...")
+            # Note: Fetching logic now attempts to get 'Newest' via profiles then falls back to search.
+            log.debug("Fetching tokens from DexScreener...")
             pairs = await api.get_pairs_by_chain(settings.TARGET_CHAIN)
             
             if not pairs:
@@ -58,23 +56,24 @@ async def pipeline_task():
                     continue
                 
                 # 3. Analyze & Filter
-                # This now includes the strict Age Check
+                # This applies ALL strategy.yaml filters (Liquidity, Age, Volume, etc.)
                 result = AnalysisEngine.analyze_token(pair)
                 
                 # Mark as processed regardless of result to avoid re-calculating bad tokens
+                # This prevents spamming logs or reprocessing the same rejected token
                 processed_tokens.add(addr) 
                 
                 if result:
-                    # 4. Filter by Risk (Double check)
+                    # 4. Final Safety Check
                     if result['risk']['is_safe']:
-                        log.info(f"Signal found: {result['baseToken']['symbol']} ({addr}) - Age: {result['age_hours']}h")
+                        log.info(f"Signal MATCH: {result['baseToken']['symbol']} ({addr}) - Age: {result['age_hours']}h")
                         await signal_bot.broadcast_signal(result)
                         new_signals_count += 1
                     else:
-                        log.debug(f"Filtered Risky/Old: {result['baseToken']['symbol']}")
+                        log.debug(f"Rejected (Risk): {result['baseToken']['symbol']} - {result['risk']['reasons']}")
             
             if new_signals_count > 0:
-                log.info(f"Processed batch. New Signals: {new_signals_count}")
+                log.info(f"Pipeline Batch Complete. Signals Sent: {new_signals_count}")
 
             # Cleanup processed cache to prevent memory leak
             # We keep it large enough to cover the API's return window
@@ -151,7 +150,6 @@ async def main():
         await api.start()
         
         # Initialize Bots
-        # Note: These methods start the polling/updater internally
         await alert_bot.initialize()
         await signal_bot.initialize()
     except Exception as e:
@@ -194,8 +192,6 @@ async def main():
 
     # 5. Runtime Loop
     try:
-        # On Windows, signal handling is different, simple wait is safer
-        # On Linux/VPS, stop_event.wait() works with signal handlers
         await stop_event.wait()
     except asyncio.CancelledError:
         log.warning("Main execution cancelled.")
@@ -236,5 +232,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        # Handled by signal handler usually, but catch here just in case
         pass
