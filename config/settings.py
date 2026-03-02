@@ -12,8 +12,9 @@ class Settings(BaseSettings):
     CHANNEL_ID: int
     LOG_CHANNEL_ID: Optional[int] = Field(default=None, description="Channel ID for security logs")
     LOG_LEVEL: str = "INFO"
-    POLL_INTERVAL: int = 60  # Auto-refresh interval (seconds)
+    POLL_INTERVAL: int = 60
     TARGET_CHAIN: str = Field(default="solana", description="Default blockchain to monitor")
+    FETCH_LIMIT: int = Field(default=300, description="Max tokens to fetch per cycle")
 
     class Config:
         env_file = ".env"
@@ -42,7 +43,6 @@ class StrategyConfig:
         self._data = self._load()
 
     def _load(self) -> Dict[str, Any]:
-        """Loads strategy safely with defaults."""
         defaults = {
             "filters": {
                 "min_liquidity_usd": 1000,
@@ -62,6 +62,9 @@ class StrategyConfig:
                 "strict_filtering": True,
                 "take_profit_percent": 100,
                 "stop_loss_percent": -25
+            },
+            "system": {
+                "fetch_limit": 300 # Default matches typical API max per call
             }
         }
         
@@ -118,31 +121,35 @@ class StrategyConfig:
     def weights(self): return self._data.get('weights', {})
     @property
     def thresholds(self): return self._data.get('thresholds', {})
+    @property
+    def system(self): return self._data.get('system', {})
 
     def get_parameter_description(self, section, key):
-        """Returns a user-friendly description for settings."""
         descriptions = {
             "filters": {
-                "min_liquidity_usd": "Minimum Pool Liquidity (USD). Token must have at least this much locked liquidity.",
-                "max_age_hours": "Maximum Token Age (Hours). Tokens older than this are ignored.",
-                "min_volume_h1": "Minimum 1-Hour Volume (USD). Token must have traded this amount in last hour.",
-                "max_fdv": "Maximum Fully Diluted Valuation. Caps the market cap size. 0 = Disabled.",
-                "min_fdv": "Minimum Fully Diluted Valuation. 0 = Disabled."
+                "min_liquidity_usd": "Minimum Pool Liquidity (USD).",
+                "max_age_hours": "Maximum Token Age (Hours).",
+                "min_volume_h1": "Minimum 1-Hour Volume (USD).",
+                "max_fdv": "Maximum FDV. 0 = Disabled.",
+                "min_fdv": "Minimum FDV. 0 = Disabled."
             },
             "weights": {
-                "volume_authenticity": "Volume Quality Weight. Higher value prioritizes organic volume patterns.",
-                "liquidity_score": "Liquidity Weight. Higher value prioritizes deep liquidity pools.",
-                "whale_presence": "Whale Detection Weight. Impact of whale activity on risk score.",
-                "dev_reputation": "Developer Reputation Weight. Impact of deployer history."
+                "volume_authenticity": "Volume Quality Weight.",
+                "liquidity_score": "Liquidity Weight.",
+                "whale_presence": "Whale Detection Weight.",
+                "dev_reputation": "Developer Reputation Weight."
             },
             "thresholds": {
-                "strict_filtering": "Strict Mode (True/False). If True, drops tokens with missing data (e.g. no age).",
-                "risk_alert_level": "Risk Score Threshold (0-100). Higher score = Riskier. Tokens above this are filtered.",
-                "take_profit_percent": "Watchlist TP %. Percentage gain to trigger exit alert.",
-                "stop_loss_percent": "Watchlist SL %. Percentage loss to trigger exit alert."
+                "strict_filtering": "Strict Mode (True/False).",
+                "risk_alert_level": "Risk Score Threshold (0-100).",
+                "take_profit_percent": "TP %.",
+                "stop_loss_percent": "SL %."
+            },
+            "system": {
+                "fetch_limit": "Max tokens fetched per cycle from API (Max 600 rec)."
             }
         }
-        return descriptions.get(section, {}).get(key, "Internal parameter (no user-facing description defined).")
+        return descriptions.get(section, {}).get(key, "Internal parameter.")
 
 # Singletons
 settings = Settings()
