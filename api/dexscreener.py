@@ -51,11 +51,8 @@ class DexScreenerAPI:
                     if not target_tokens:
                         return []
                     
-                    # Fetch maximum allowed tokens
+                    # Fetch maximum allowed tokens (Uncapped, limited only by API length if needed, but chunking solves this)
                     # DexScreener limits comma separated addresses to ~30
-                    # We will process ALL found tokens in chunks
-                    # Limit logic removed to maximize fetch
-                    
                     log.debug(f"Fetching pair data for {len(target_tokens)} tokens...")
                     return await self.get_pairs_bulk(target_tokens)
                     
