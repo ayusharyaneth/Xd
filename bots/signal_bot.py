@@ -24,9 +24,6 @@ def admin_restricted(func):
 
         admin_ids = settings.get_admins()
         
-        # Debug Log for Auth Check
-        # log.debug(f"Auth Check: User {user.id} vs Admins {admin_ids}")
-        
         if user.id not in admin_ids:
             # 1. Reject User
             rejection_text = "🚫 This is a Private Project built for Personal use."
@@ -84,42 +81,33 @@ class SignalBot:
         
         # Text Input
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, self.handle_text_input))
-        
-        log.info("SignalBot handlers registered: /start, /ping, CallbackQueryHandler")
 
     async def initialize(self):
         log.info("Initializing Signal Bot UI...")
         await self.app.initialize()
         await self.app.start()
-        
-        # drop_pending_updates=True ensures the bot starts clean
         await self.app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-        log.info("Signal Bot Polling Started Successfully")
+        log.info("Signal Bot Dashboard Active")
 
     # --- Command Handlers ---
 
     @admin_restricted
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        log.info(f"Received /start from {update.effective_user.id}")
         context.user_data.clear()
         await self._render_dashboard(update.message, is_new=True)
 
     @admin_restricted
     async def cmd_ping(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        log.info(f"Received /ping from {update.effective_user.id}")
         msg_date = update.message.date
         now_ts = time.time()
         msg_ts = msg_date.timestamp()
         latency_ms = max(0, (now_ts - msg_ts) * 1000)
         
-        text, reply_markup = self._generate_diagnostics_content(latency_ms)
-        await update.message.reply_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+        await update.message.reply_text(f"🏓 Pong! Latency: {latency_ms:.0f}ms")
 
     # --- Interaction Router ---
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # Log callback reception
-        # log.debug(f"Callback received: {update.callback_query.data}")
         await self._restricted_callback_logic(update, context)
 
     @admin_restricted
@@ -146,9 +134,9 @@ class SignalBot:
             elif action == "dashboard_refresh":
                 await self._handle_dashboard_refresh(query)
 
-            elif action == "ping_action":
-                await query.answer("Running Diagnostics...")
-                await self._render_diagnostics_panel(query.message)
+            # Manual API Trigger
+            elif action == "api_manual_fetch":
+                await self._handle_manual_api_fetch(query)
 
             # Settings Navigation
             elif action == "settings_home":
@@ -216,41 +204,79 @@ class SignalBot:
         except Exception:
             await update.message.reply_text("✖ Invalid format.")
 
-    # --- UI Generators ---
+    # --- Manual API Fetch Logic ---
 
-    def _generate_diagnostics_content(self, latency_ms: float):
-        sys_metrics = SystemHealth.get_metrics()
-        watches = len(state_manager.get_all())
+    async def _handle_manual_api_fetch(self, query):
+        """
+        Triggers a manual fetch from DexScreener and reports results.
+        """
+        await query.answer("Initiating API Request...")
+        await query.message.edit_text("⏳ **Fetching Data from DexScreener...**\nChain: `solana`")
         
-        status_icon = "🟢" if not sys_metrics['safe_mode'] else "🟡"
-        status_text = "HEALTHY" if not sys_metrics['safe_mode'] else "DEGRADED"
-        
-        text = (
-            f"**SYSTEM DIAGNOSTICS**\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"{status_icon} **System Status:** `{status_text}`\n"
-            f"⚡ **Latency:** `{latency_ms:.0f} ms`\n"
-            f"🖥 **CPU Usage:** `{sys_metrics['cpu']}%`\n"
-            f"🧠 **RAM Usage:** `{sys_metrics['ram']}%`\n"
-            f"👁 **Active Watches:** `{watches}`\n"
-            f"🛡 **Safe Mode:** `{'ACTIVE' if sys_metrics['safe_mode'] else 'INACTIVE'}`\n"
-            f"📊 **Market Regime:** `NORMAL`\n"
-            f"🕒 **Time:** `{get_ist_time_str()}`"
-        )
-        
-        keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
-        return text, InlineKeyboardMarkup(keyboard)
+        start_time = time.time()
+        try:
+            # 1. Fetch
+            pairs = await self.api.get_pairs_by_chain(settings.TARGET_CHAIN)
+            count = len(pairs) if pairs else 0
+            
+            # 2. Success Reporting
+            timestamp = get_ist_time_str()
+            duration = time.time() - start_time
+            
+            msg = (
+                f"✅ **API Fetch Successful**\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"🔗 **Chain:** `{settings.TARGET_CHAIN}`\n"
+                f"📊 **Tokens Fetched:** `{count}`\n"
+                f"⏱ **Duration:** `{duration:.2f}s`\n"
+                f"🕒 **Time:** `{timestamp}`"
+            )
+            
+            keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
+            await query.message.edit_text(msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+            
+            # 3. Log to Dedicated Channel
+            if settings.LOG_CHANNEL_ID:
+                user_id = query.from_user.id
+                log_msg = (
+                    f"📡 **API Fetch Completed (Manual)**\n"
+                    f"🔗 **Chain:** `{settings.TARGET_CHAIN}`\n"
+                    f"📊 **Tokens Retrieved:** `{count}`\n"
+                    f"🕒 **Time:** `{timestamp}`\n"
+                    f"👤 **Triggered By:** `{user_id}`"
+                )
+                try:
+                    await self.app.bot.send_message(chat_id=settings.LOG_CHANNEL_ID, text=log_msg, parse_mode='Markdown')
+                except Exception as e:
+                    log.error(f"Failed to log API fetch success: {e}")
+
+        except Exception as e:
+            # 4. Failure Handling
+            log.error(f"Manual API Fetch Failed: {e}")
+            timestamp = get_ist_time_str()
+            
+            fail_msg = (
+                f"❌ **API Fetch Failed**\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n"
+                f"⚠ **Error:** `{str(e)}`\n"
+                f"🕒 **Time:** `{timestamp}`"
+            )
+            keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
+            await query.message.edit_text(fail_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
+
+            if settings.LOG_CHANNEL_ID:
+                log_fail_msg = (
+                    f"❌ **API Fetch Failed (Manual)**\n"
+                    f"🔗 **Chain:** `{settings.TARGET_CHAIN}`\n"
+                    f"⚠ **Error:** `{str(e)}`\n"
+                    f"🕒 **Time:** `{timestamp}`"
+                )
+                try:
+                    await self.app.bot.send_message(chat_id=settings.LOG_CHANNEL_ID, text=log_fail_msg, parse_mode='Markdown')
+                except:
+                    pass
 
     # --- UI Renderers ---
-
-    async def _render_diagnostics_panel(self, message):
-        start = time.perf_counter()
-        sys_metrics = SystemHealth.get_metrics() 
-        end = time.perf_counter()
-        latency_ms = (end - start) * 1000
-        
-        text, reply_markup = self._generate_diagnostics_content(latency_ms)
-        await message.edit_text(text, parse_mode='Markdown', reply_markup=reply_markup)
 
     async def _render_dashboard(self, message, is_new=False):
         watchlist_count = len(state_manager.get_all())
@@ -284,7 +310,7 @@ class SignalBot:
                 InlineKeyboardButton("❓ Help", callback_data="help_menu")
             ],
             [
-                InlineKeyboardButton("🏓 Ping", callback_data="ping_action")
+                InlineKeyboardButton("🌐 API Request", callback_data="api_manual_fetch")
             ]
         ]
         
@@ -299,6 +325,7 @@ class SignalBot:
         
         try:
             start = time.perf_counter()
+            # Lightweight check
             await self.api.get_pairs_by_chain(settings.TARGET_CHAIN)
             end = time.perf_counter()
             latency = (end - start) * 1000
@@ -447,13 +474,9 @@ class SignalBot:
             await query.answer("Error adding token")
 
     async def _handle_signal_refresh(self, query, address):
-        """
-        Refreshes a specific signal message in place without spamming new messages.
-        """
         await query.answer("Refreshing Signal Data...")
         
         try:
-            # 1. Fetch latest data for this specific token
             pairs = await self.api.get_pairs_bulk([address])
             
             if not pairs:
@@ -461,15 +484,12 @@ class SignalBot:
                 return
 
             pair = pairs[0]
-            
-            # 2. Re-Analyze
             analysis = AnalysisEngine.analyze_token(pair)
             
             if not analysis:
                 await query.answer("Token no longer meets criteria", show_alert=True)
                 return
 
-            # 3. Re-Render Message
             metrics = analysis.get('metrics', {})
             vol_h1 = metrics.get('volume_h1', 0)
             p_change = metrics.get('price_change_h1', 0)
@@ -521,7 +541,7 @@ class SignalBot:
             "• **Watchlist**: Track saved tokens.\n"
             "• **Refresh**: Force system metric sync.\n"
             "• **Settings**: Configure algorithm.\n"
-            "• **Ping**: detailed system health.\n\n"
+            "• **API Request**: Manual trigger for token fetch.\n\n"
             "**Automated Signals**\n"
             "Bot scans for new tokens meeting 'Filters'.\n"
             "Signals are sent to the channel."
@@ -530,8 +550,6 @@ class SignalBot:
         await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
 
     async def broadcast_signal(self, analysis: dict):
-        """Sends the formatted signal to the channel"""
-        
         metrics = analysis.get('metrics', {})
         vol_h1 = metrics.get('volume_h1', 0)
         p_change = metrics.get('price_change_h1', 0)
