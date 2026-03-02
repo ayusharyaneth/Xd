@@ -1,10 +1,11 @@
 import asyncio
 import signal
+import sys
 from datetime import datetime
 from config.settings import settings, strategy
 from utils.logger import log, setup_logger
 from utils.state import state_manager
-from utils.helpers import get_current_datetime_str
+from utils.helpers import get_ist_time_str
 from api.dexscreener import DexScreenerAPI
 from engines.analysis import AnalysisEngine
 from bots.signal_bot import SignalBot
@@ -34,46 +35,57 @@ async def pipeline_task():
                 continue
 
             # 2. Fetch Data
+            # Note: The API likely uses a search query. 
+            # This returns 'relevant' tokens, which might be old.
+            # The AnalysisEngine MUST filter by Age.
+            log.debug("Fetching pairs from DexScreener...")
             pairs = await api.get_pairs_by_chain(settings.TARGET_CHAIN)
             
             if not pairs:
                 log.debug("No pairs returned from API.")
                 await asyncio.sleep(settings.POLL_INTERVAL)
                 continue
-
+            
+            log.debug(f"Fetched {len(pairs)} pairs.")
             new_signals_count = 0
             
             for pair in pairs:
                 addr = pair.get('pairAddress')
                 if not addr: continue
 
+                # Dedup check (Runtime)
                 if addr in processed_tokens:
                     continue
                 
                 # 3. Analyze & Filter
+                # This now includes the strict Age Check
                 result = AnalysisEngine.analyze_token(pair)
                 
-                # Mark as processed
+                # Mark as processed regardless of result to avoid re-calculating bad tokens
                 processed_tokens.add(addr) 
                 
                 if result:
-                    # 4. Filter by Risk
+                    # 4. Filter by Risk (Double check)
                     if result['risk']['is_safe']:
-                        log.info(f"Signal found: {result['baseToken']['symbol']} ({addr})")
+                        log.info(f"Signal found: {result['baseToken']['symbol']} ({addr}) - Age: {result['age_hours']}h")
                         await signal_bot.broadcast_signal(result)
                         new_signals_count += 1
                     else:
-                        log.debug(f"Filtered Risky: {result['baseToken']['symbol']}")
+                        log.debug(f"Filtered Risky/Old: {result['baseToken']['symbol']}")
             
             if new_signals_count > 0:
                 log.info(f"Processed batch. New Signals: {new_signals_count}")
 
+            # Cleanup processed cache to prevent memory leak
+            # We keep it large enough to cover the API's return window
             if len(processed_tokens) > 10000:
                 processed_tokens.clear()
+                log.info("Cleared processed tokens cache.")
             
             await asyncio.sleep(settings.POLL_INTERVAL)
 
         except asyncio.CancelledError:
+            log.info("Pipeline task cancelled.")
             raise
         except Exception as e:
             log.error(f"Pipeline Iteration Error: {e}")
@@ -91,7 +103,9 @@ async def watch_task():
                 await asyncio.sleep(30)
                 continue
 
+            log.debug(f"Checking watchlist ({len(watchlist)} tokens)...")
             addresses = list(watchlist.keys())
+            # Batch fetch updates
             current_data = await api.get_pairs_bulk(addresses)
             
             for pair in current_data:
@@ -106,6 +120,7 @@ async def watch_task():
 
                 pnl_pct = ((curr_price - entry_price) / entry_price) * 100
                 
+                # Exit Logic
                 tp = strategy.thresholds.get('take_profit_percent', 100)
                 sl = strategy.thresholds.get('stop_loss_percent', -25)
 
@@ -119,6 +134,7 @@ async def watch_task():
             await asyncio.sleep(60)
             
         except asyncio.CancelledError:
+            log.info("Watch task cancelled.")
             raise
         except Exception as e:
             log.error(f"Watch Task Error: {e}")
@@ -130,15 +146,20 @@ async def main():
     
     # 1. Initialize System Components
     log.info("Initializing System...")
-    await state_manager.load()
-    await api.start()
-    
-    # Initialize Bots
-    await alert_bot.initialize()
-    await signal_bot.initialize()
+    try:
+        await state_manager.load()
+        await api.start()
+        
+        # Initialize Bots
+        # Note: These methods start the polling/updater internally
+        await alert_bot.initialize()
+        await signal_bot.initialize()
+    except Exception as e:
+        log.critical(f"Failed to initialize system: {e}")
+        return
 
     # 2. Send Online Alert
-    timestamp = get_current_datetime_str()
+    timestamp = get_ist_time_str()
     try:
         await alert_bot.send_system_alert(
             f"🟢 **Bot Status: ONLINE**\n"
@@ -156,8 +177,12 @@ async def main():
         stop_event.set()
 
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda s=sig: handle_signal(s))
+    if sys.platform != 'win32':
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, lambda s=sig: handle_signal(s))
+    else:
+        # Windows handling if needed
+        pass
 
     # 4. Launch Background Tasks
     tasks = [
@@ -169,6 +194,8 @@ async def main():
 
     # 5. Runtime Loop
     try:
+        # On Windows, signal handling is different, simple wait is safer
+        # On Linux/VPS, stop_event.wait() works with signal handlers
         await stop_event.wait()
     except asyncio.CancelledError:
         log.warning("Main execution cancelled.")
@@ -181,7 +208,7 @@ async def main():
         # 6. Graceful Shutdown Procedure
         log.info("Initiating Graceful Shutdown...")
 
-        timestamp = get_current_datetime_str()
+        timestamp = get_ist_time_str()
         try:
             await alert_bot.send_system_alert(
                 f"🔴 **Bot Status: OFFLINE**\n"
@@ -209,4 +236,5 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
+        # Handled by signal handler usually, but catch here just in case
         pass
