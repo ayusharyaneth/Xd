@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     CHANNEL_ID: int
     LOG_CHANNEL_ID: Optional[int] = Field(default=None, description="Channel ID for security logs")
     LOG_LEVEL: str = "INFO"
-    POLL_INTERVAL: int = 15
+    POLL_INTERVAL: int = 60  # Auto-refresh interval (seconds)
     TARGET_CHAIN: str = Field(default="solana", description="Default blockchain to monitor")
 
     class Config:
@@ -21,13 +21,10 @@ class Settings(BaseSettings):
 
     @property
     def admin_list(self) -> List[int]:
-        """Parses comma-separated ADMIN_IDS string into a list of integers."""
-        if not self.ADMIN_IDS:
-            return []
+        if not self.ADMIN_IDS: return []
         try:
             return [int(x.strip()) for x in self.ADMIN_IDS.split(",") if x.strip()]
-        except ValueError:
-            return []
+        except ValueError: return []
 
     def get_admins(self) -> List[int]:
         return self.admin_list
@@ -35,8 +32,7 @@ class Settings(BaseSettings):
     @field_validator("LOG_CHANNEL_ID", mode="before")
     @classmethod
     def validate_log_channel(cls, v):
-        if v == "" or v is None:
-            return None
+        if v == "" or v is None: return None
         return int(v)
 
 class StrategyConfig:
@@ -52,11 +48,14 @@ class StrategyConfig:
                 "min_liquidity_usd": 1000,
                 "max_age_hours": 24,
                 "min_volume_h1": 500,
-                "max_fdv": 0,          # 0 = disabled
-                "min_fdv": 0           # 0 = disabled
+                "max_fdv": 0,
+                "min_fdv": 0
             }, 
             "weights": {
-                "volume_authenticity": 1.5
+                "volume_authenticity": 1.5,
+                "liquidity_score": 1.0,
+                "whale_presence": 2.0,
+                "dev_reputation": 1.0
             }, 
             "thresholds": {
                 "risk_alert_level": 70,
@@ -72,7 +71,6 @@ class StrategyConfig:
         try:
             with open(self.filepath, "r") as f:
                 loaded = yaml.safe_load(f) or {}
-                # Deep merge defaults
                 for section in defaults:
                     if section not in loaded:
                         loaded[section] = defaults[section]
@@ -86,12 +84,10 @@ class StrategyConfig:
             return defaults
 
     async def reload(self):
-        """Hot-reloads the configuration from disk."""
         async with self._lock:
             self._data = self._load()
 
     async def save(self):
-        """Persists current in-memory configuration to disk."""
         async with self._lock:
             try:
                 with open(self.filepath, "w") as f:
@@ -100,25 +96,18 @@ class StrategyConfig:
                 print(f"Error saving strategy: {e}")
 
     async def update_setting(self, section: str, key: str, value: Any):
-        if section not in self._data:
-            self._data[section] = {}
+        if section not in self._data: self._data[section] = {}
         
         current_val = self._data[section].get(key)
-        
-        # Type enforcement
         if current_val is not None:
             if isinstance(current_val, bool):
                 value = str(value).lower() in ('true', '1', 'yes', 'on')
             elif isinstance(current_val, int):
-                try:
-                    value = int(value)
-                except:
-                    return # Invalid input
+                try: value = int(value)
+                except: return
             elif isinstance(current_val, float):
-                try:
-                    value = float(value)
-                except:
-                    return
+                try: value = float(value)
+                except: return
         
         self._data[section][key] = value
         await self.save()
@@ -140,6 +129,12 @@ class StrategyConfig:
                 "max_fdv": "Maximum Fully Diluted Valuation. Caps the market cap size. 0 = Disabled.",
                 "min_fdv": "Minimum Fully Diluted Valuation. 0 = Disabled."
             },
+            "weights": {
+                "volume_authenticity": "Volume Quality Weight. Higher value prioritizes organic volume patterns.",
+                "liquidity_score": "Liquidity Weight. Higher value prioritizes deep liquidity pools.",
+                "whale_presence": "Whale Detection Weight. Impact of whale activity on risk score.",
+                "dev_reputation": "Developer Reputation Weight. Impact of deployer history."
+            },
             "thresholds": {
                 "strict_filtering": "Strict Mode (True/False). If True, drops tokens with missing data (e.g. no age).",
                 "risk_alert_level": "Risk Score Threshold (0-100). Higher score = Riskier. Tokens above this are filtered.",
@@ -147,7 +142,7 @@ class StrategyConfig:
                 "stop_loss_percent": "Watchlist SL %. Percentage loss to trigger exit alert."
             }
         }
-        return descriptions.get(section, {}).get(key, "No description available.")
+        return descriptions.get(section, {}).get(key, "Internal parameter (no user-facing description defined).")
 
 # Singletons
 settings = Settings()
