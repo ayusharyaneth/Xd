@@ -24,6 +24,9 @@ def admin_restricted(func):
 
         admin_ids = settings.get_admins()
         
+        # Debug Log for Auth Check
+        # log.debug(f"Auth Check: User {user.id} vs Admins {admin_ids}")
+        
         if user.id not in admin_ids:
             # 1. Reject User
             rejection_text = "🚫 This is a Private Project built for Personal use."
@@ -81,23 +84,29 @@ class SignalBot:
         
         # Text Input
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, self.handle_text_input))
+        
+        log.info("SignalBot handlers registered: /start, /ping, CallbackQueryHandler")
 
     async def initialize(self):
         log.info("Initializing Signal Bot UI...")
         await self.app.initialize()
         await self.app.start()
+        
+        # drop_pending_updates=True ensures the bot starts clean
         await self.app.updater.start_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
-        log.info("Signal Bot Dashboard Active")
+        log.info("Signal Bot Polling Started Successfully")
 
     # --- Command Handlers ---
 
     @admin_restricted
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        log.info(f"Received /start from {update.effective_user.id}")
         context.user_data.clear()
         await self._render_dashboard(update.message, is_new=True)
 
     @admin_restricted
     async def cmd_ping(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        log.info(f"Received /ping from {update.effective_user.id}")
         msg_date = update.message.date
         now_ts = time.time()
         msg_ts = msg_date.timestamp()
@@ -109,15 +118,8 @@ class SignalBot:
     # --- Interaction Router ---
 
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # We handle 'signal_refresh' WITHOUT admin restriction to allow public channel interaction if desired.
-        # However, for consistency with project rules, we apply admin restriction unless it's a public button.
-        # But per requirements "Only specific Telegram user IDs... are allowed to... Trigger refresh",
-        # we must wrap this logic.
-        
-        # For now, we apply admin restriction to ALL actions as requested, 
-        # but in a real signal bot, 'Refresh' might be public. 
-        # Following strict requirement: "Only specific Telegram user IDs... are allowed".
-        
+        # Log callback reception
+        # log.debug(f"Callback received: {update.callback_query.data}")
         await self._restricted_callback_logic(update, context)
 
     @admin_restricted
@@ -468,9 +470,6 @@ class SignalBot:
                 return
 
             # 3. Re-Render Message
-            # We preserve original detection time if stored, otherwise we use current time
-            # Ideally detection time should be passed in callback_data, but for simplicity we show current state
-            
             metrics = analysis.get('metrics', {})
             vol_h1 = metrics.get('volume_h1', 0)
             p_change = metrics.get('price_change_h1', 0)
