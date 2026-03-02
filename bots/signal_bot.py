@@ -36,15 +36,11 @@ class SignalBot:
         self._setup_handlers()
 
     def _setup_handlers(self):
-        # Commands
         self.app.add_handler(CommandHandler("start", self.cmd_start))
         self.app.add_handler(CommandHandler("ping", self.cmd_ping))
         self.app.add_handler(CommandHandler("settings_guide", self.cmd_settings_guide))
         
-        # Callbacks
         self.app.add_handler(CallbackQueryHandler(self.handle_callback))
-        
-        # Text Input
         self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, self.handle_text_input))
 
     async def initialize(self):
@@ -71,35 +67,18 @@ class SignalBot:
 
     @admin_restricted
     async def cmd_settings_guide(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Displays a guide for all strategy parameters."""
         text = (
             "📘 **STRATEGY CONFIGURATION GUIDE**\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "**FILTER LOGIC:**\n"
-            "All filters use **AND** logic. A token must pass ALL enabled checks to be signaled.\n\n"
-            
-            "**PARAMETERS:**\n\n"
-            "🔹 **min_liquidity_usd**\n"
-            "• DexScreener Field: `liquidity.usd`\n"
-            "• Min pool liquidity required. Prevents rugs with $10 liq.\n\n"
-            
-            "🔹 **min_volume_h1**\n"
-            "• DexScreener Field: `volume.h1`\n"
-            "• Min trading volume in last hour. Ensures activity.\n\n"
-            
-            "🔹 **max_age_hours**\n"
-            "• Calc: `(Current Time - pairCreatedAt)`\n"
-            "• Max age of token. Filters out old/dead coins.\n\n"
-            
-            "🔹 **max_fdv / min_fdv**\n"
-            "• DexScreener Field: `fdv`\n"
-            "• Market Cap limits. Set 0 to disable.\n\n"
-            
-            "🔹 **strict_filtering**\n"
-            "• If `True`: Tokens missing data (like age) are DROPPEd.\n"
-            "• If `False`: Tokens missing data are PASSED (Riskier).\n\n"
-            
-            "💡 *Use /start > Settings to edit these values.*"
+            "All filters use **AND** logic.\n\n"
+            "**PARAMETERS:**\n"
+            "🔹 **min_liquidity_usd**: Min pool liquidity.\n"
+            "🔹 **min_volume_h1**: Min 1H volume.\n"
+            "🔹 **max_age_hours**: Max token age.\n"
+            "🔹 **max_fdv**: Max Market Cap.\n"
+            "🔹 **strict_filtering**: Drop missing data tokens.\n\n"
+            "💡 *Use /start > Settings to edit.*"
         )
         await update.message.reply_text(text, parse_mode='Markdown')
 
@@ -111,6 +90,11 @@ class SignalBot:
     @admin_restricted
     async def _restricted_callback_logic(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
+        
+        # Ensure we always acknowledge to stop loading spinner, unless handled later
+        # We'll ack inside specific handlers if needed or default here
+        # await query.answer() # Ack early might be safer
+        
         data = query.data.split(":")
         action = data[0]
         
@@ -135,16 +119,19 @@ class SignalBot:
             elif action == "settings_home":
                 await query.answer()
                 await self._render_settings_home(query.message)
+            
             elif action == "settings_cat":
                 await query.answer()
                 category = data[1]
                 await self._render_settings_category(query.message, category)
+            
             elif action == "settings_toggle":
                 await query.answer()
                 category, key = data[1], data[2]
                 current = getattr(strategy, category).get(key, False)
                 await strategy.update_setting(category, key, not current)
                 await self._render_settings_category(query.message, category)
+            
             elif action == "settings_prompt":
                 await query.answer()
                 category, key = data[1], data[2]
@@ -176,8 +163,7 @@ class SignalBot:
             log.error(f"UI Interaction Error ({action}): {e}")
             try:
                 await query.answer("Request Error", show_alert=True)
-            except:
-                pass
+            except: pass
 
     @admin_restricted
     async def handle_text_input(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -189,103 +175,22 @@ class SignalBot:
             cat = edit_state['cat']
             key = edit_state['key']
             
-            # This triggers save to strategy.yaml + reload
             await strategy.update_setting(cat, key, val)
             
             await update.message.reply_text(f"✔ **Saved:** `{key}` → `{val}`", parse_mode='Markdown')
             context.user_data['edit_mode'] = None
+            
+            # Log change
+            log.info(f"Setting updated: {cat}.{key} = {val} by {update.effective_user.id}")
+            
             await self._render_settings_category(update.message, cat, is_new=True)
             
-        except Exception:
+        except Exception as e:
+            log.error(f"Settings update error: {e}")
             await update.message.reply_text("✖ Invalid format. Please enter a valid number.")
 
-    # --- UI Renderers ---
+    # --- Manual API Fetch Logic ---
 
-    async def _render_dashboard(self, message, is_new=False):
-        watchlist_count = len(state_manager.get_all())
-        sys_metrics = SystemHealth.get_metrics()
-        
-        safe_status = "ON" if sys_metrics['safe_mode'] else "OFF"
-        status_emoji = "🟡" if sys_metrics['safe_mode'] else "🟢"
-        heartbeat = f"{settings.POLL_INTERVAL}s"
-        timestamp = get_ist_time_str("%H:%M IST")
-
-        text = (
-            f"📡 **DEXSCREENER TERMINAL**\n"
-            f"────────────────\n\n"
-            f"{status_emoji} **Status:** `Online`\n"
-            f"⚡ **Heartbeat:** `{heartbeat}`\n"
-            f"📊 **Active Watches:** `{watchlist_count}`\n"
-            f"🎯 **Active Filters:** `{len(strategy.filters)}`\n"
-            f"🛡 **Safe Mode:** `{safe_status}`\n"
-            f"🕒 **Last Refresh:** `{timestamp}`\n\n"
-            f"────────────────\n"
-            f"Select an action below:"
-        )
-
-        keyboard = [
-            [
-                InlineKeyboardButton("📈 Watchlist", callback_data="watchlist_view"),
-                InlineKeyboardButton("🔄 Refresh", callback_data="dashboard_refresh")
-            ],
-            [
-                InlineKeyboardButton("⚙ Settings", callback_data="settings_home"),
-                InlineKeyboardButton("❓ Help", callback_data="help_menu")
-            ],
-            [
-                InlineKeyboardButton("🌐 API Request", callback_data="api_manual_fetch")
-            ]
-        ]
-        
-        markup = InlineKeyboardMarkup(keyboard)
-        if is_new:
-            await message.reply_text(text, reply_markup=markup, parse_mode='Markdown')
-        else:
-            await message.edit_text(text, reply_markup=markup, parse_mode='Markdown')
-
-    async def _render_settings_home(self, message):
-        text = (
-            "⚙ **SYSTEM CONFIGURATION**\n"
-            "────────────────\n"
-            "Select a module to configure:"
-        )
-        keyboard = [
-            [InlineKeyboardButton("🔍 Filters (Liquidity, Age)", callback_data="settings_cat:filters")],
-            [InlineKeyboardButton("⚖ Scoring Weights", callback_data="settings_cat:weights")],
-            [InlineKeyboardButton("🛡 Risk Thresholds", callback_data="settings_cat:thresholds")],
-            [InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]
-        ]
-        await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
-
-    async def _render_settings_category(self, message, category, is_new=False):
-        data = getattr(strategy, category)
-        text = f"⚙ **EDITING: {category.upper()}**\nClick to modify:"
-        
-        keyboard = []
-        for key, val in data.items():
-            if isinstance(val, bool):
-                status = "ON" if val else "OFF"
-                btn_text = f"{key} [{status}]"
-                cb_data = f"settings_toggle:{category}:{key}"
-            else:
-                # Add units/context if possible, keeping it brief
-                btn_text = f"{key}: {val}"
-                cb_data = f"settings_prompt:{category}:{key}"
-            
-            keyboard.append([InlineKeyboardButton(btn_text, callback_data=cb_data)])
-        
-        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="settings_home")])
-        
-        markup = InlineKeyboardMarkup(keyboard)
-        if is_new:
-            await message.reply_text(text, reply_markup=markup, parse_mode='Markdown')
-        else:
-            await message.edit_text(text, reply_markup=markup, parse_mode='Markdown')
-            
-    # --- Other handlers (watchlist, api fetch, etc.) remain as previously implemented ---
-    # Included full file above implies they are part of the class but truncated here for brevity
-    # ensuring they are present in the actual output if modified.
-    
     async def _handle_manual_api_fetch(self, query):
         await query.answer("Initiating API Request...")
         await query.message.edit_text("⏳ **Fetching Data from DexScreener...**\nChain: `solana`")
@@ -337,6 +242,50 @@ class SignalBot:
             keyboard = [[InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]]
             await query.message.edit_text(fail_msg, parse_mode='Markdown', reply_markup=InlineKeyboardMarkup(keyboard))
 
+    # --- UI Renderers ---
+
+    async def _render_dashboard(self, message, is_new=False):
+        watchlist_count = len(state_manager.get_all())
+        sys_metrics = SystemHealth.get_metrics()
+        
+        safe_status = "ON" if sys_metrics['safe_mode'] else "OFF"
+        status_emoji = "🟡" if sys_metrics['safe_mode'] else "🟢"
+        heartbeat = f"{settings.POLL_INTERVAL}s"
+        timestamp = get_ist_time_str("%H:%M IST")
+
+        text = (
+            f"📡 **DEXSCREENER TERMINAL**\n"
+            f"────────────────\n\n"
+            f"{status_emoji} **Status:** `Online`\n"
+            f"⚡ **Heartbeat:** `{heartbeat}`\n"
+            f"📊 **Active Watches:** `{watchlist_count}`\n"
+            f"🎯 **Active Filters:** `{len(strategy.filters)}`\n"
+            f"🛡 **Safe Mode:** `{safe_status}`\n"
+            f"🕒 **Last Refresh:** `{timestamp}`\n\n"
+            f"────────────────\n"
+            f"Select an action below:"
+        )
+
+        keyboard = [
+            [
+                InlineKeyboardButton("📈 Watchlist", callback_data="watchlist_view"),
+                InlineKeyboardButton("🔄 Refresh", callback_data="dashboard_refresh")
+            ],
+            [
+                InlineKeyboardButton("⚙ Settings", callback_data="settings_home"),
+                InlineKeyboardButton("❓ Help", callback_data="help_menu")
+            ],
+            [
+                InlineKeyboardButton("🌐 API Request", callback_data="api_manual_fetch")
+            ]
+        ]
+        
+        markup = InlineKeyboardMarkup(keyboard)
+        if is_new:
+            await message.reply_text(text, reply_markup=markup, parse_mode='Markdown')
+        else:
+            await message.edit_text(text, reply_markup=markup, parse_mode='Markdown')
+
     async def _handle_dashboard_refresh(self, query):
         await query.answer("Syncing System Metrics...")
         try:
@@ -368,6 +317,44 @@ class SignalBot:
         except Exception as e:
             log.error(f"Dashboard Refresh Failed: {e}")
             await query.answer("Connection Error", show_alert=True)
+
+    async def _render_settings_home(self, message):
+        text = (
+            "⚙ **SYSTEM CONFIGURATION**\n"
+            "────────────────\n"
+            "Select a module to configure:"
+        )
+        keyboard = [
+            [InlineKeyboardButton("🔍 Filters (Liquidity, Age)", callback_data="settings_cat:filters")],
+            [InlineKeyboardButton("⚖ Scoring Weights", callback_data="settings_cat:weights")],
+            [InlineKeyboardButton("🛡 Risk Thresholds", callback_data="settings_cat:thresholds")],
+            [InlineKeyboardButton("🔙 Dashboard", callback_data="dashboard")]
+        ]
+        await message.edit_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+
+    async def _render_settings_category(self, message, category, is_new=False):
+        data = getattr(strategy, category)
+        text = f"⚙ **EDITING: {category.upper()}**\nClick to modify:"
+        
+        keyboard = []
+        for key, val in data.items():
+            if isinstance(val, bool):
+                status = "ON" if val else "OFF"
+                btn_text = f"{key} [{status}]"
+                cb_data = f"settings_toggle:{category}:{key}"
+            else:
+                btn_text = f"{key}: {val}"
+                cb_data = f"settings_prompt:{category}:{key}"
+            
+            keyboard.append([InlineKeyboardButton(btn_text, callback_data=cb_data)])
+        
+        keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="settings_home")])
+        
+        markup = InlineKeyboardMarkup(keyboard)
+        if is_new:
+            await message.reply_text(text, reply_markup=markup, parse_mode='Markdown')
+        else:
+            await message.edit_text(text, reply_markup=markup, parse_mode='Markdown')
 
     async def _render_watchlist(self, message):
         watchlist = state_manager.get_all()
