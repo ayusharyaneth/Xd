@@ -29,7 +29,6 @@ class Settings(BaseSettings):
         except ValueError:
             return []
 
-    # Alias method to support existing calls to get_admins()
     def get_admins(self) -> List[int]:
         return self.admin_list
 
@@ -52,7 +51,9 @@ class StrategyConfig:
             "filters": {
                 "min_liquidity_usd": 1000,
                 "max_age_hours": 24,
-                "min_volume_h1": 500
+                "min_volume_h1": 500,
+                "max_fdv": 0,          # 0 = disabled
+                "min_fdv": 0           # 0 = disabled
             }, 
             "weights": {
                 "volume_authenticity": 1.5
@@ -71,6 +72,7 @@ class StrategyConfig:
         try:
             with open(self.filepath, "r") as f:
                 loaded = yaml.safe_load(f) or {}
+                # Deep merge defaults
                 for section in defaults:
                     if section not in loaded:
                         loaded[section] = defaults[section]
@@ -102,13 +104,21 @@ class StrategyConfig:
             self._data[section] = {}
         
         current_val = self._data[section].get(key)
+        
+        # Type enforcement
         if current_val is not None:
             if isinstance(current_val, bool):
                 value = str(value).lower() in ('true', '1', 'yes', 'on')
             elif isinstance(current_val, int):
-                value = int(value)
+                try:
+                    value = int(value)
+                except:
+                    return # Invalid input
             elif isinstance(current_val, float):
-                value = float(value)
+                try:
+                    value = float(value)
+                except:
+                    return
         
         self._data[section][key] = value
         await self.save()
@@ -119,6 +129,25 @@ class StrategyConfig:
     def weights(self): return self._data.get('weights', {})
     @property
     def thresholds(self): return self._data.get('thresholds', {})
+
+    def get_parameter_description(self, section, key):
+        """Returns a user-friendly description for settings."""
+        descriptions = {
+            "filters": {
+                "min_liquidity_usd": "Minimum Pool Liquidity (USD). Token must have at least this much locked liquidity.",
+                "max_age_hours": "Maximum Token Age (Hours). Tokens older than this are ignored.",
+                "min_volume_h1": "Minimum 1-Hour Volume (USD). Token must have traded this amount in last hour.",
+                "max_fdv": "Maximum Fully Diluted Valuation. Caps the market cap size. 0 = Disabled.",
+                "min_fdv": "Minimum Fully Diluted Valuation. 0 = Disabled."
+            },
+            "thresholds": {
+                "strict_filtering": "Strict Mode (True/False). If True, drops tokens with missing data (e.g. no age).",
+                "risk_alert_level": "Risk Score Threshold (0-100). Higher score = Riskier. Tokens above this are filtered.",
+                "take_profit_percent": "Watchlist TP %. Percentage gain to trigger exit alert.",
+                "stop_loss_percent": "Watchlist SL %. Percentage loss to trigger exit alert."
+            }
+        }
+        return descriptions.get(section, {}).get(key, "No description available.")
 
 # Singletons
 settings = Settings()
