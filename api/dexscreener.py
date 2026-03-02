@@ -4,6 +4,7 @@ from fake_useragent import UserAgent
 from tenacity import retry, stop_after_attempt, wait_exponential
 from config.settings import settings
 from utils.logger import log
+import time
 
 class DexScreenerAPI:
     def __init__(self):
@@ -11,10 +12,17 @@ class DexScreenerAPI:
         self.token_profiles_url = "https://api.dexscreener.com/token-profiles/latest/v1"
         self.ua = UserAgent()
         self.session = None
+        self._rate_limit_lock = asyncio.Lock()
+        self.last_request_time = 0
+        self.request_interval = 0.5  # Prevent spamming API
 
     async def start(self):
-        connector = aiohttp.TCPConnector(limit=100, ttl_dns_cache=300)
-        self.session = aiohttp.ClientSession(connector=connector)
+        if self.session and not self.session.closed:
+            return
+            
+        timeout = aiohttp.ClientTimeout(total=15, connect=5)
+        connector = aiohttp.TCPConnector(limit=50, ttl_dns_cache=300, keepalive_timeout=30)
+        self.session = aiohttp.ClientSession(connector=connector, timeout=timeout)
 
     async def close(self):
         if self.session:
@@ -27,19 +35,25 @@ class DexScreenerAPI:
             "Accept-Encoding": "gzip, deflate"
         }
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    async def _throttle(self):
+        """Enforces a simple rate limit to avoid 429s."""
+        async with self._rate_limit_lock:
+            now = time.time()
+            elapsed = now - self.last_request_time
+            if elapsed < self.request_interval:
+                await asyncio.sleep(self.request_interval - elapsed)
+            self.last_request_time = time.time()
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5))
     async def get_pairs_by_chain(self, chain: str):
         """
-        Fetches the latest token profiles for a specific chain.
-        Now fetches MAXIMUM possible tokens by increasing batch size and iteration.
+        Fetches token profiles efficiently.
         """
-        url = self.token_profiles_url
-        log.debug(f"Fetching token profiles from: {url}")
-        
         if not self.session: await self.start()
-
+        
         try:
-            async with self.session.get(url, headers=self._get_headers(), timeout=15) as resp:
+            await self._throttle()
+            async with self.session.get(self.token_profiles_url, headers=self._get_headers()) as resp:
                 if resp.status == 200:
                     profiles = await resp.json()
                     
@@ -51,55 +65,54 @@ class DexScreenerAPI:
                     if not target_tokens:
                         return []
                     
-                    # Fetch maximum allowed tokens (Uncapped, limited only by API length if needed, but chunking solves this)
-                    # DexScreener limits comma separated addresses to ~30
-                    log.debug(f"Fetching pair data for {len(target_tokens)} tokens...")
+                    # Fetch pairs concurrently
                     return await self.get_pairs_bulk(target_tokens)
                     
                 else:
-                    log.error(f"Token profiles fetch failed. Status: {resp.status}")
+                    log.warning(f"Profiles fetch failed: {resp.status}")
                     return []
                     
         except Exception as e:
-            log.warning(f"Token profiles fetch exception: {e}")
+            log.error(f"API Profile Fetch Error: {e}")
             return []
 
     async def get_pairs_bulk(self, addresses: list):
         if not addresses: return []
+        if not self.session: await self.start()
         
-        # DexScreener chunk limit is 30
+        # Chunking (DexScreener limit ~30)
         chunk_size = 30
         chunks = [addresses[i:i + chunk_size] for i in range(0, len(addresses), chunk_size)]
-        results = []
         
-        if not self.session: await self.start()
-
-        # Concurrent fetching for speed if many chunks
         tasks = []
         for chunk in chunks:
             url = f"{self.base_url}/tokens/{','.join(chunk)}"
             tasks.append(self._fetch_chunk(url))
             
+        # Execute concurrently
         chunk_results = await asyncio.gather(*tasks, return_exceptions=True)
         
+        results = []
         for res in chunk_results:
             if isinstance(res, list):
                 results.extend(res)
             elif isinstance(res, Exception):
-                log.error(f"Chunk fetch error: {res}")
+                log.error(f"Chunk fetch failed: {res}")
 
-        log.debug(f"Total pair data fetched: {len(results)}")
         return results
 
     async def _fetch_chunk(self, url):
         try:
-            async with self.session.get(url, headers=self._get_headers(), timeout=10) as resp:
+            await self._throttle()
+            async with self.session.get(url, headers=self._get_headers()) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get('pairs', [])
+                elif resp.status == 429:
+                    log.warning("Rate Limited (429)")
+                    return []
                 else:
-                    log.warning(f"Bulk fetch failed for chunk. Status: {resp.status}")
                     return []
         except Exception as e:
-            log.error(f"Bulk fetch exception: {e}")
+            log.error(f"Fetch Chunk Error: {e}")
             return []
