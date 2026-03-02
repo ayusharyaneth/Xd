@@ -24,6 +24,7 @@ processed_tokens = set()
 async def pipeline_task():
     """
     Core Intelligence Loop: Fetches, Filters, Analyzes, Alerts.
+    Executes every POLL_INTERVAL seconds (Default 60s).
     """
     log.info(f"Starting Pipeline Task (Chain: {settings.TARGET_CHAIN})...")
     
@@ -35,7 +36,8 @@ async def pipeline_task():
                 continue
 
             # 2. Fetch Data
-            # Note: Fetching logic uses profiles endpoint to find new tokens.
+            # log.debug("Fetching tokens from DexScreener...")
+            start_time = datetime.now()
             pairs = await api.get_pairs_by_chain(settings.TARGET_CHAIN)
             
             if not pairs:
@@ -50,35 +52,41 @@ async def pipeline_task():
                 addr = pair.get('pairAddress')
                 if not addr: continue
 
-                # Dedup check (Runtime)
                 if addr in processed_tokens:
                     continue
                 
                 # 3. Analyze & Filter
-                # This applies ALL strategy.yaml filters (Liquidity, Age, Volume, etc.)
                 result = AnalysisEngine.analyze_token(pair)
-                
-                # Mark as processed regardless of result to avoid re-calculating bad tokens
                 processed_tokens.add(addr) 
                 
                 if result:
-                    # 4. Final Safety Check
                     if result['risk']['is_safe']:
-                        log.info(f"Signal MATCH: {result['baseToken']['symbol']} ({addr}) - Age: {result['age_hours']}h")
+                        log.info(f"Signal MATCH: {result['baseToken']['symbol']} ({addr})")
                         await signal_bot.broadcast_signal(result)
                         new_signals_count += 1
                     else:
-                        # Log specific rejection reason if risk check fails
-                        log.debug(f"Rejected (Risk): {result['baseToken']['symbol']} - {result['risk']['reasons']}")
+                        # log.debug(f"Rejected (Risk): {result['baseToken']['symbol']}")
                         dropped_count += 1
                 else:
-                    # Token filtered out by hard filters (Liq, Age, etc.)
                     dropped_count += 1
             
-            log.info(f"Pipeline Cycle: {len(pairs)} fetched | {new_signals_count} matched | {dropped_count} dropped")
+            # log.info(f"Pipeline Cycle: {len(pairs)} fetched | {new_signals_count} matched | {dropped_count} dropped")
 
-            # Cleanup processed cache to prevent memory leak
-            # We keep it large enough to cover the API's return window
+            # 4. Log to Dedicated Channel
+            if settings.LOG_CHANNEL_ID:
+                timestamp = get_ist_time_str()
+                log_msg = (
+                    f"📡 **Auto Refresh Triggered**\n"
+                    f"🔗 **Chain:** `{settings.TARGET_CHAIN}`\n"
+                    f"📊 **Tokens Fetched:** `{len(pairs)}`\n"
+                    f"🎯 **Matches:** `{new_signals_count}`\n"
+                    f"🕒 **Time:** `{timestamp}`"
+                )
+                try:
+                    await alert_bot.app.bot.send_message(chat_id=settings.LOG_CHANNEL_ID, text=log_msg, parse_mode='Markdown')
+                except Exception as e:
+                    log.error(f"Failed to log auto refresh: {e}")
+
             if len(processed_tokens) > 10000:
                 processed_tokens.clear()
                 log.info("Cleared processed tokens cache.")
@@ -90,6 +98,15 @@ async def pipeline_task():
             raise
         except Exception as e:
             log.error(f"Pipeline Iteration Error: {e}")
+            if settings.LOG_CHANNEL_ID:
+                try:
+                    ts = get_ist_time_str()
+                    await alert_bot.app.bot.send_message(
+                        chat_id=settings.LOG_CHANNEL_ID, 
+                        text=f"❌ **Auto Refresh Failed**\n⚠ Error: `{str(e)}`\n🕒 `{ts}`", 
+                        parse_mode='Markdown'
+                    )
+                except: pass
             await asyncio.sleep(5) 
 
 async def watch_task():
@@ -104,8 +121,8 @@ async def watch_task():
                 await asyncio.sleep(30)
                 continue
 
+            # log.debug(f"Checking watchlist ({len(watchlist)} tokens)...")
             addresses = list(watchlist.keys())
-            # Batch fetch updates
             current_data = await api.get_pairs_bulk(addresses)
             
             for pair in current_data:
@@ -120,7 +137,6 @@ async def watch_task():
 
                 pnl_pct = ((curr_price - entry_price) / entry_price) * 100
                 
-                # Exit Logic
                 tp = strategy.thresholds.get('take_profit_percent', 100)
                 sl = strategy.thresholds.get('stop_loss_percent', -25)
 
@@ -141,23 +157,18 @@ async def watch_task():
             await asyncio.sleep(10)
 
 async def main():
-    # 0. Configure Logging
     setup_logger(settings.LOG_LEVEL)
-    
-    # 1. Initialize System Components
     log.info("Initializing System...")
+    
     try:
         await state_manager.load()
         await api.start()
-        
-        # Initialize Bots
         await alert_bot.initialize()
         await signal_bot.initialize()
     except Exception as e:
         log.critical(f"Failed to initialize system: {e}")
         return
 
-    # 2. Send Online Alert
     timestamp = get_ist_time_str()
     try:
         await alert_bot.send_system_alert(
@@ -168,7 +179,6 @@ async def main():
     except Exception as e:
         log.error(f"Failed to send startup alert: {e}")
 
-    # 3. Setup Shutdown Signals
     stop_event = asyncio.Event()
     
     def handle_signal(sig):
@@ -179,11 +189,7 @@ async def main():
     if sys.platform != 'win32':
         for sig in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(sig, lambda s=sig: handle_signal(s))
-    else:
-        # Windows handling if needed
-        pass
 
-    # 4. Launch Background Tasks
     tasks = [
         asyncio.create_task(TaskSupervisor.create_task(pipeline_task(), "Pipeline")),
         asyncio.create_task(TaskSupervisor.create_task(watch_task(), "WatchMonitor"))
@@ -191,7 +197,6 @@ async def main():
 
     log.success("All systems operational. Main loop running.")
 
-    # 5. Runtime Loop
     try:
         await stop_event.wait()
     except asyncio.CancelledError:
@@ -202,9 +207,7 @@ async def main():
             await alert_bot.send_system_alert(f"🔥 **CRITICAL CRASH**\nException: `{str(e)}`")
         except: pass
     finally:
-        # 6. Graceful Shutdown Procedure
         log.info("Initiating Graceful Shutdown...")
-
         timestamp = get_ist_time_str()
         try:
             await alert_bot.send_system_alert(
