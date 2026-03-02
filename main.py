@@ -35,8 +35,7 @@ async def pipeline_task():
                 continue
 
             # 2. Fetch Data
-            # Note: Fetching logic now attempts to get 'Newest' via profiles then falls back to search.
-            log.debug("Fetching tokens from DexScreener...")
+            # Note: Fetching logic uses profiles endpoint to find new tokens.
             pairs = await api.get_pairs_by_chain(settings.TARGET_CHAIN)
             
             if not pairs:
@@ -44,8 +43,8 @@ async def pipeline_task():
                 await asyncio.sleep(settings.POLL_INTERVAL)
                 continue
             
-            log.debug(f"Fetched {len(pairs)} pairs.")
             new_signals_count = 0
+            dropped_count = 0
             
             for pair in pairs:
                 addr = pair.get('pairAddress')
@@ -60,7 +59,6 @@ async def pipeline_task():
                 result = AnalysisEngine.analyze_token(pair)
                 
                 # Mark as processed regardless of result to avoid re-calculating bad tokens
-                # This prevents spamming logs or reprocessing the same rejected token
                 processed_tokens.add(addr) 
                 
                 if result:
@@ -70,10 +68,14 @@ async def pipeline_task():
                         await signal_bot.broadcast_signal(result)
                         new_signals_count += 1
                     else:
+                        # Log specific rejection reason if risk check fails
                         log.debug(f"Rejected (Risk): {result['baseToken']['symbol']} - {result['risk']['reasons']}")
+                        dropped_count += 1
+                else:
+                    # Token filtered out by hard filters (Liq, Age, etc.)
+                    dropped_count += 1
             
-            if new_signals_count > 0:
-                log.info(f"Pipeline Batch Complete. Signals Sent: {new_signals_count}")
+            log.info(f"Pipeline Cycle: {len(pairs)} fetched | {new_signals_count} matched | {dropped_count} dropped")
 
             # Cleanup processed cache to prevent memory leak
             # We keep it large enough to cover the API's return window
@@ -102,7 +104,6 @@ async def watch_task():
                 await asyncio.sleep(30)
                 continue
 
-            log.debug(f"Checking watchlist ({len(watchlist)} tokens)...")
             addresses = list(watchlist.keys())
             # Batch fetch updates
             current_data = await api.get_pairs_bulk(addresses)
