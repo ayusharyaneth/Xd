@@ -42,7 +42,7 @@
 <p align="center">
   <a href="https://t.me/AyushAryaneth">
     <img src="https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram" />
-  </a> </a>
+  </a>
   <a href="https://x.com/ayusharyaneth" target="_blank">
     <img src="https://img.shields.io/badge/X-000?style=for-the-badge&logo=x" />
   </a>
@@ -64,7 +64,6 @@
       <img src="https://img.shields.io/static/v1.svg?style=for-the-badge&label=License&message=MIT&logoColor=d9e0ee&colorA=363a4f&colorB=b7bdf8" alt="License Badge">
     </a>
   </p>
-</div>
 
 
  
