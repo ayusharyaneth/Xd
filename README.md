@@ -52,7 +52,7 @@
     <img src="https://img.shields.io/badge/Telegram-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram" />
   </a>
   <a href="https://x.com/ayusharyaneth" target="_blank">
-    <img src="https://img.shields.io/badge/X-000?style=for-the-badge&logo=x" alt="X" />
+    <img src="https://img.shields.io/badge/X-000?style=for-the-badge&logo=x" alt="X (formerly Twitter)" />
   </a>
 </p>
 
