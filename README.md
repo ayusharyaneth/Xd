@@ -63,15 +63,15 @@
 <table align="center">
   <tr>
     <td align="center">
-      <img src="https://github-readme-stats.vercel.app/api?username=ayusharyaneth&show_icons=true&theme=github_dark&hide_border=true" alt="GitHub stats" />
+      <img src="https://github-readme-stats-git-masterrstaa-rickstaa.vercel.app/api?username=ayusharyaneth&show_icons=true&theme=github_dark&hide_border=true" alt="GitHub stats" />
     </td>
     <td align="center">
-      <img src="https://github-readme-streak-stats.herokuapp.com/?user=ayusharyaneth&theme=github-dark-blue&hide_border=true" alt="GitHub streak" />
+      <img src="https://streak-stats.demolab.com/?user=ayusharyaneth&theme=github-dark-blue&hide_border=true" alt="GitHub streak" />
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="https://github-readme-stats.vercel.app/api/top-langs/?username=ayusharyaneth&layout=compact&theme=github_dark&hide_border=true" alt="Top languages" />
+      <img src="https://github-readme-stats-git-masterrstaa-rickstaa.vercel.app/api/top-langs/?username=ayusharyaneth&layout=compact&theme=github_dark&hide_border=true" alt="Top languages" />
     </td>
     <td align="center">
       <img src="https://github-profile-summary-cards.vercel.app/api/cards/stats?username=ayusharyaneth&theme=github_dark" alt="Profile stats" />
