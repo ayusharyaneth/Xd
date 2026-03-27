@@ -56,7 +56,7 @@
   </a>
 </p>
 
-## 🐍💜 Watch My Contributions Slither!
+## 🐍💜 Contribution Activity Visualization
 
 > *Every commit feeds the snake!* 🌀✨
 
