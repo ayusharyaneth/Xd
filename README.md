@@ -1,49 +1,57 @@
 <p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=wave&color=0:0f2027,50:203a43,100:2c5364&height=170&section=header&text=Ayush%20Aryaneth&fontSize=40&fontColor=ffffff&animation=fadeIn" alt="Ayush Aryaneth header" />
+  <img src="https://capsule-render.vercel.app/api?type=wave&color=0:0f2027,50:203a43,100:2c5364&height=190&section=header&text=Ayush%20Aryaneth&fontSize=42&fontColor=ffffff&animation=fadeIn" alt="Ayush Aryaneth header" />
 </p>
 
-<div align="center">
-  <strong>Blockchain builder • Crypto explorer • Lifelong learner</strong>
-  <p>Passionate about shipping ideas that blend elegant engineering with practical utility.</p>
-  <p>
-    <img src="https://komarev.com/ghpvc/?username=ayusharyaneth&label=Profile%20Views&color=0f2027&style=flat" alt="Profile views" />
-    <a href="https://github.com/ayusharyaneth?tab=followers">
-      <img src="https://img.shields.io/github/followers/ayusharyaneth?label=Followers&style=social" alt="GitHub Followers" />
-    </a>
-    <a href="https://github.com/ayusharyaneth?tab=stars">
-      <img src="https://img.shields.io/github/stars/ayusharyaneth?label=Stars&style=social" alt="GitHub Stars" />
-    </a>
-  </p>
-</div>
+<h1 align="center">Ayush Aryaneth</h1>
+<p align="center">
+  <strong>Blockchain builder • Product engineer • Curious explorer</strong>
+</p>
+<p align="center">
+  Designing pragmatic Web3 experiences, scaling reliable backend systems, and learning by shipping.
+</p>
+
+<p align="center">
+  <img src="https://readme-typing-svg.demolab.com?font=Inter&size=18&duration=2800&pause=700&color=36BCF7&center=true&vCenter=true&width=560&lines=Building+Web3+products+with+real-world+utility;Scaling+APIs+and+data+pipelines;Always+learning+through+experiments+and+prototypes" alt="Typing animation" />
+</p>
+
+<p align="center">
+  <img src="https://komarev.com/ghpvc/?username=ayusharyaneth&label=Profile%20Views&color=0f2027&style=flat" alt="Profile views" />
+  <a href="https://github.com/ayusharyaneth?tab=followers">
+    <img src="https://img.shields.io/github/followers/ayusharyaneth?label=Followers&style=social" alt="GitHub Followers" />
+  </a>
+  <a href="https://github.com/ayusharyaneth?tab=stars">
+    <img src="https://img.shields.io/github/stars/ayusharyaneth?label=Stars&style=social" alt="GitHub Stars" />
+  </a>
+</p>
 
 ---
 
-## ✨ About
+## ✨ At a Glance
 
-- Blockchain innovator and builder who loves shipping ideas.
-- Crypto explorer focused on learning, experimenting, and iterating fast.
-- Works primarily with JavaScript/Node.js and Python/Django.
+- 🚀 Building Web3 experiences that feel intuitive and ship quickly
+- ⚙️ Engineering backend systems that scale with confidence
+- 🧠 Staying curious with research, prototypes, and rapid feedback loops
 
-## 🎯 Focus Areas
+## 🎯 Focus Themes
 
 <table align="center">
   <tr>
-    <td align="center" width="220">
-      <strong>Web3 Products</strong><br />
-      dApp concepts, UX, and developer tooling
+    <td align="center" width="240">
+      <strong>Web3 Product Craft</strong><br />
+      dApp UX, onboarding flows, and community tools
     </td>
-    <td align="center" width="220">
-      <strong>Backend Systems</strong><br />
-      Scalable APIs and data workflows
+    <td align="center" width="240">
+      <strong>Backend Reliability</strong><br />
+      APIs, data workflows, and performance tuning
     </td>
-    <td align="center" width="220">
-      <strong>Continuous Learning</strong><br />
-      Research, prototypes, and rapid feedback
+    <td align="center" width="240">
+      <strong>Learning & R&amp;D</strong><br />
+      Research sprints, experiments, and tech deep dives
     </td>
   </tr>
 </table>
 
-## 🛠️ Tech Stack
+## 🛠️ Core Toolbox
 
 <p align="center">
   <img src="https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black" alt="JavaScript" />
@@ -52,7 +60,7 @@
   <img src="https://img.shields.io/badge/Django-092D3F?style=for-the-badge&logo=django&logoColor=white" alt="Django" />
 </p>
 
-## 📈 GitHub Dashboard
+## 📊 GitHub Snapshot
 
 <p align="center">
   <a href="https://github.com/ayusharyaneth">
@@ -79,7 +87,7 @@
   </tr>
 </table>
 
-## 🌍 Connect With Me
+## 🌍 Connect
 
 <p align="center">
   <a href="https://t.me/AyushAryaneth">
@@ -90,9 +98,7 @@
   </a>
 </p>
 
-## 🐍💜 Contribution Activity
-
-> *Every commit feeds the snake.* 🌀✨
+## 🐍 Contribution Flow
 
 <p align="center">
   <picture>
