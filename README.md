@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://readme-typing-svg.demolab.com?font=Inter&size=18&duration=2800&pause=700&color=36BCF7&center=true&vCenter=true&width=560&lines=Building+Web3+products+with+real-world+utility;Scaling+APIs+and+data+pipelines;Always+learning+through+experiments+and+prototypes" alt="Typing animation" />
+  <img src="https://readme-typing-svg.demolab.com?center=true&vCenter=true&width=560&lines=Building+Web3+products+with+real-world+utility;Scaling+APIs+and+data+pipelines;Always+learning+through+experiments+and+prototypes" alt="Typing animation" />
 </p>
 
 <p align="center">
