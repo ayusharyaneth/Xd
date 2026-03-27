@@ -52,24 +52,32 @@
   <img src="https://img.shields.io/badge/Django-092D3F?style=for-the-badge&logo=django&logoColor=white" alt="Django" />
 </p>
 
-## 📈 GitHub Highlights
-
-<table align="center">
-  <tr>
-    <td>
-      <img src="https://github-readme-stats.vercel.app/api?username=ayusharyaneth&show_icons=true&theme=github_dark&hide_border=true" alt="GitHub stats" />
-    </td>
-    <td>
-      <img src="https://github-readme-streak-stats.herokuapp.com/?user=ayusharyaneth&theme=github-dark-blue&hide_border=true" alt="GitHub streak" />
-    </td>
-  </tr>
-</table>
+## 📈 GitHub Dashboard
 
 <p align="center">
   <a href="https://github.com/ayusharyaneth">
     <img src="https://github-profile-summary-cards.vercel.app/api/cards/profile-details?username=ayusharyaneth&theme=github_dark" alt="Profile summary" />
   </a>
 </p>
+
+<table align="center">
+  <tr>
+    <td align="center">
+      <img src="https://github-readme-stats.vercel.app/api?username=ayusharyaneth&show_icons=true&theme=github_dark&hide_border=true" alt="GitHub stats" />
+    </td>
+    <td align="center">
+      <img src="https://github-readme-streak-stats.herokuapp.com/?user=ayusharyaneth&theme=github-dark-blue&hide_border=true" alt="GitHub streak" />
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="https://github-readme-stats.vercel.app/api/top-langs/?username=ayusharyaneth&layout=compact&theme=github_dark&hide_border=true" alt="Top languages" />
+    </td>
+    <td align="center">
+      <img src="https://github-profile-summary-cards.vercel.app/api/cards/stats?username=ayusharyaneth&theme=github_dark" alt="Profile stats" />
+    </td>
+  </tr>
+</table>
 
 ## 🌍 Connect With Me
 
